@@ -1,0 +1,20 @@
+# PRD — GiftsDates (imported)
+
+## Original problem statement
+"add exact website from Github saving all logins and texture" — https://github.com/GiftsDates21/GiftsDates21.git
+
+## User choices
+- Public repo; keep original login system; keep exact look, adapt to run here.
+
+## Architecture
+React (CRA/craco) + FastAPI (server.py, ~4.9k lines) + MongoDB. JWT email/password auth. Emergent LLM (translation/support chat), Stripe (test key), Emergent object storage.
+
+## Implemented (2026-06)
+- Repo copied as-is into /app; deps installed; backend .env given JWT_SECRET, EMERGENT_LLM_KEY, STRIPE_SECRET_KEY, ADMIN_EMAILS.
+- Admin account created: giftsdates@gmail.com (see memory/test_credentials.md).
+- Smoke test passed 100% backend + frontend.
+
+## Not configured / backlog
+- P1: Email (EMERGENT_EMAIL_KEY) and Twilio SMS not configured.
+- P1: Original user accounts/data not in repo (they live in the old database).
+- P2: Stripe webhook secret, PUBLIC_APP_URL, WEBHOOK_CRON_SECRET.
