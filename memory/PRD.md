@@ -15,6 +15,7 @@ React (CRA/craco) + FastAPI (server.py, ~4.9k lines) + MongoDB. JWT email/passwo
 - Smoke test passed 100% backend + frontend.
 
 - Stripe: Emergent claimable sandbox provisioned (acct_1UPpFf2ejuym8P5a, CA, test mode) and keys added to backend/.env. Coins, custom amounts, Premium/Lite (one-time, Stripe-managed tax) and VIP (subscription) checkout tested end-to-end (iteration_2: 100%).
+- Availability v2 (2026-10): owners set a weekly schedule + specific days, each with multiple time ranges (overnight supported). Inviters pick any open day and any 15-min start time on a clock picker (plus 2.5h quick chips); backend validates the full 2.5h fits a range and avoids booked/buffer blocks. Fixed Profile save crash (empty relationship_intent / 422 toast). iteration_3 + manual verification.
 
 ## Not configured / backlog
 - P1: Email (EMERGENT_EMAIL_KEY) and Twilio SMS not configured.

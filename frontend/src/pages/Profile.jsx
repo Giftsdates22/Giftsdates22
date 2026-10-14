@@ -78,14 +78,17 @@ export default function Profile() {
     setBusy(true);
     try {
       const payload = { ...f };
-      for (const k of DETAIL_KEYS) if (payload[k] === "" || payload[k] === null) payload[k] = ["hobbies", "languages_spoken", "availability"].includes(k) ? [] : ["availability_time", "availability_slots", "availability_ranges", "availability_weekly"].includes(k) ? {} : "";
+      for (const k of DETAIL_KEYS) if (payload[k] === "" || payload[k] === null) payload[k] = ["hobbies", "languages_spoken", "availability", "relationship_intent", "orientations"].includes(k) ? [] : ["availability_time", "availability_slots", "availability_ranges", "availability_weekly"].includes(k) ? {} : "";
       if (!payload.availability_time?.from) payload.availability_time = { from: "18:00", to: "23:00" };
       if (!payload.height) delete payload.height;
       if (!payload.weight) delete payload.weight;
       if (!payload.date_price) delete payload.date_price;
       if (!payload.video_rate) delete payload.video_rate;
       await api.patch("/auth/me", payload); await refreshUser(); toast.success(t("saved", lang));
-    } catch (e) { toast.error(e.response?.data?.detail || t("failed", lang)); } finally { setBusy(false); }
+    } catch (e) {
+      const d = e.response?.data?.detail;
+      toast.error(typeof d === "string" ? d : Array.isArray(d) ? d.map(x => x.msg).join("; ") : t("failed", lang));
+    } finally { setBusy(false); }
   };
 
   return (
