@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { CalendarHeart, Camera, Clock, Check, X, Car, Info, Coins } from "lucide-react";
 import { MapsLink } from "./AddressPicker";
 import AddressPicker from "./AddressPicker";
+import AddToCalendar from "./AddToCalendar";
 
 const STATUS_MAP = { escrow: "status_escrow", accepted: "status_accepted", confirmed: "status_confirmed", released: "status_released", cancelled: "status_cancelled", declined: "status_declined" };
 const STATUS_COLOR = { escrow: "bg-amber-500/15 text-amber-300 border-amber-500/30", accepted: "bg-sky-500/15 text-sky-300 border-sky-500/30", confirmed: "bg-violet-500/15 text-violet-300 border-violet-500/30", released: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30", cancelled: "bg-red-500/15 text-red-300 border-red-500/30", declined: "bg-red-500/15 text-red-300 border-red-500/30" };
@@ -133,6 +134,10 @@ export default function DateBookingList({ mode = "regular" }) {
           <span className="text-xs text-amber-300 font-mono-num">🪙 {b.coins}</span>
           {b.release_at && b.status === "confirmed" && <span className="text-xs text-slate-500">🔓 {t("unlocks_at", lang)}: {new Date(b.release_at).toLocaleString()}</span>}
         </div>
+        {["accepted", "confirmed"].includes(b.status) && (
+          <div className="mt-2"><AddToCalendar id={b.id} title={`GiftsDates: ${b.selected_activity || "Date"} · ${b.venue}`}
+            place={[b.venue, b.address, b.city, b.country].filter(Boolean).join(", ")} start={new Date(b.scheduled_at)} /></div>
+        )}
         {(() => {
           const taxi = b.taxi;
           const active = ["escrow", "accepted", "confirmed"].includes(b.status);

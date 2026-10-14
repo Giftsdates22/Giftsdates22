@@ -10,6 +10,7 @@ import { t } from "../lib/i18n";
 import AddressPicker, { MapsLink } from "../components/AddressPicker";
 import DateBookingList from "../components/DateBookingList";
 import CancelledDates from "../components/CancelledDates";
+import AddToCalendar from "../components/AddToCalendar";
 
 const FALLBACK = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&q=80";
 const TERMINAL = ["COMPLETED", "COMPLETED_AUTO", "CANCELLED", "CANCELLED_TRANSPORTATION", "REFUNDED"];
@@ -93,21 +94,6 @@ function DateCard({ d, reload }) {
     const s = loc.scheduled_start ? new Date(loc.scheduled_start) : null;
     const e = loc.scheduled_end ? new Date(loc.scheduled_end) : (s ? new Date(s.getTime() + 3 * 3600 * 1000) : null);
     return { title, place, s, e };
-  };
-  const _fmtCal = (dt) => dt.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-  const googleCalUrl = () => {
-    const { title, place, s, e } = _calEvent();
-    if (!s || !e) return "#";
-    const p = new URLSearchParams({ action: "TEMPLATE", text: title, dates: `${_fmtCal(s)}/${_fmtCal(e)}`, details: `Your GiftsDates date. Coordinate in the app: ${window.location.origin}/dates`, location: place });
-    return `https://calendar.google.com/calendar/render?${p.toString()}`;
-  };
-  const downloadIcs = () => {
-    const { title, place, s, e } = _calEvent();
-    if (!s || !e) return;
-    const esc = (x) => (x || "").replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
-    const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//GiftsDates//EN", "BEGIN:VEVENT", `UID:${d.id}@giftsdates`, `DTSTAMP:${_fmtCal(new Date())}`, `DTSTART:${_fmtCal(s)}`, `DTEND:${_fmtCal(e)}`, `SUMMARY:${esc(title)}`, `LOCATION:${esc(place)}`, `DESCRIPTION:${esc("Your GiftsDates date. Coordinate in the app.")}`, "END:VEVENT", "END:VCALENDAR"].join("\r\n");
-    const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar;charset=utf-8" }));
-    const a = document.createElement("a"); a.href = url; a.download = `giftsdates-${d.id}.ics`; a.click(); URL.revokeObjectURL(url);
   };
   const showCal = !!d.location?.scheduled_start && !["CANCELLED", "CANCELLED_TRANSPORTATION", "REFUNDED"].includes(d.status);
 
@@ -291,10 +277,7 @@ function DateCard({ d, reload }) {
         {canVerify && ["DATE_CONFIRMED", "DATE_COMPLETED_PENDING_VERIFICATION"].includes(d.status) &&
           <Button data-testid={`date-verify-${d.id}`} onClick={() => setShowVerify(v => !v)} variant="outline" className="h-9 bg-emerald-500/10 border-emerald-500/40 text-emerald-300"><Camera size={14} className="me-1" />{tr("id_send_photo_conf")}</Button>}
         {chatEnabled && <Button data-testid={`date-chat-toggle-${d.id}`} onClick={() => setShowChat(v => !v)} variant="outline" className="h-9 bg-sky-500/10 border-sky-500/40 text-sky-300"><MessageCircle size={14} className="me-1" />{tr("id_chat")}</Button>}
-        {showCal && <>
-          <a data-testid={`date-cal-google-${d.id}`} href={googleCalUrl()} target="_blank" rel="noreferrer" className="inline-flex items-center h-9 px-3 rounded-md text-sm bg-white/5 border border-white/15 text-slate-200 hover:bg-white/10"><CalendarPlus size={14} className="me-1" />{tr("id_cal_google")}</a>
-          <Button data-testid={`date-cal-ics-${d.id}`} onClick={downloadIcs} variant="outline" className="h-9 bg-white/5 border-white/15"><CalendarPlus size={14} className="me-1" />{tr("id_cal_ics")}</Button>
-        </>}
+        {showCal && (() => { const ev = _calEvent(); return <AddToCalendar id={d.id} title={ev.title} place={ev.place} start={ev.s} end={ev.e} />; })()}
       </div>
 
       {showReport && (
