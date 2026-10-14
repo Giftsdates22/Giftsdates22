@@ -56,6 +56,24 @@ function DateChat({ did, meId, lang }) {
   );
 }
 
+function DateTimeRange({ id, start }) {
+  const { lang } = useApp();
+  const s = new Date(start), e = new Date(s.getTime() + 150 * 60000);
+  const hm = (x) => x.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
+  const nextDay = e.toDateString() !== s.toDateString();
+  return (
+    <div className="mt-1.5 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-xs" data-testid={`date-time-range-${id}`}>
+      <Clock size={12} className="text-rose-300" />
+      <span className="text-slate-200">{s.toLocaleDateString(lang, { weekday: "short", day: "numeric", month: "short" })}</span>
+      <span className="text-slate-500">·</span>
+      <span className="text-slate-400">{t("dt_starts", lang)}</span><b className="font-mono-num text-white" data-testid={`date-time-start-${id}`}>{hm(s)}</b>
+      <span className="text-rose-300">→</span>
+      <span className="text-slate-400">{t("dt_ends", lang)}</span><b className="font-mono-num text-white" data-testid={`date-time-end-${id}`}>{hm(e)}{nextDay ? " +1" : ""}</b>
+      <span className="text-slate-500">(2.5h)</span>
+    </div>
+  );
+}
+
 function SwitchToTaxi({ d, busy, onSend }) {
   const { lang } = useApp();
   const tr = (k, vars) => { let s = t(k, lang); if (vars) Object.entries(vars).forEach(([n, v]) => (s = s.replace(`{${n}}`, v))); return s; };
@@ -186,7 +204,8 @@ function DateCard({ d, reload }) {
           {d.chosen_idea && <div className="text-sm text-rose-200 mt-1"><CalendarHeart size={13} className="inline me-1" />{d.chosen_idea.name}</div>}
           {!d.chosen_idea && d.options && <div className="text-xs text-slate-300 mt-1">{tr("id_options")}: {d.options.map(o => o.name).join(" · ")}</div>}
           {d.location?.venue && <div className="text-xs text-slate-400 mt-1"><MapPin size={12} className="inline me-1" />{[d.location.venue, d.location.address, d.location.city].filter(Boolean).join(", ")} <MapsLink loc={d.location} testid={`date-maps-${d.id}`} /></div>}
-          {d.location?.scheduled_start && <div className="text-xs text-slate-400"><Clock size={12} className="inline me-1" />{new Date(d.location.scheduled_start).toLocaleString()} (3h)</div>}
+          {!isInv && (d.location?.scheduled_start || d.proposed_start) ? <DateTimeRange id={d.id} start={d.location?.scheduled_start || d.proposed_start} />
+            : d.location?.scheduled_start && <div className="text-xs text-slate-400"><Clock size={12} className="inline me-1" />{new Date(d.location.scheduled_start).toLocaleString()} (3h)</div>}
           {d.transportation?.status && <div className="text-xs text-sky-300 mt-0.5"><Car size={12} className="inline me-1" />{d.transportation.type}: {d.transportation.status}{d.transportation.taxi_amount ? ` · 🪙${d.transportation.taxi_amount}` : ""}{d.transportation.pickup_address ? ` · ${d.transportation.pickup_address}` : ""}</div>}
           <div className="text-xs text-amber-300/90 mt-0.5"><Coins size={12} className="inline me-1" />🪙 {d.total_hold || d.coins}{d.gift ? ` + ${tr("id_gift")} ${d.gift.icon || ""}` : ""}</div>
           {reportOpen && <div className="text-[11px] mt-1"><Countdown to={w.report_close} label={tr("id_report_closes")} /></div>}

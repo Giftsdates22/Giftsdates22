@@ -164,6 +164,8 @@ const T = {
   ao_starts: { en: "{n} start times" },
   ao_open_any: { en: "Open any day, any time." },
   ao_best: { en: "Best day" },
+  dt_starts: { en: "Starts" },
+  dt_ends: { en: "Ends" },
   tc_locked: { en: "Locked times" },
   ls_title: { en: "Locked times" },
   ls_sub: { en: "These times were locked because a date was cancelled or refused. Reopen them to accept new invitations again." },
