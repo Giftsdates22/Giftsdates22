@@ -10,7 +10,9 @@ import { t } from "../lib/i18n";
 import AddressPicker, { MapsLink } from "../components/AddressPicker";
 import DateBookingList from "../components/DateBookingList";
 import CancelledDates from "../components/CancelledDates";
-import { SectionTitle, Stat, EmptyLine, EmptyDates } from "../components/DatesUI";
+import { SectionTitle, Stat, EmptyLine, EmptyDates, FilterBar } from "../components/DatesUI";
+import CountdownBadge from "../components/CountdownBadge";
+import { matchesFilter, countByFilter } from "../lib/dateFilters";
 import AddToCalendar from "../components/AddToCalendar";
 
 const FALLBACK = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&q=80";
@@ -165,6 +167,7 @@ function DateCard({ d, reload }) {
             <h4 className="font-serif-luxe text-lg truncate">{d.other?.name}{d.other?.age ? `, ${d.other.age}` : ""}</h4>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-slate-300 uppercase tracking-wide" data-testid={`date-status-${d.id}`}>{statusLabel()}</span>
           </div>
+          {d.status === "DATE_CONFIRMED" && d.location?.scheduled_start && <div className="mt-1.5"><CountdownBadge to={d.location.scheduled_start} testid={`date-countdown-${d.id}`} /></div>}
           <p className="text-xs text-slate-400 mt-0.5" data-testid={`date-next-${d.id}`}>➜ {stepText()}</p>
           {d.chosen_idea && <div className="text-sm text-rose-200 mt-1"><CalendarHeart size={13} className="inline me-1" />{d.chosen_idea.name}</div>}
           {!d.chosen_idea && d.options && <div className="text-xs text-slate-300 mt-1">{tr("id_options")}: {d.options.map(o => o.name).join(" · ")}</div>}
@@ -311,8 +314,14 @@ export default function InviteDates() {
   const load = useCallback(async () => { try { const r = await api.get("/invites"); setData(r.data); } catch {} }, []);
   useEffect(() => { load(); const id = setInterval(load, 20000); return () => clearInterval(id); }, [load]);
 
-  const [booked, setBooked] = useState(0);
+  const [bookedStatuses, setBookedStatuses] = useState([]);
+  const [filter, setFilter] = useState("all");
+  const inc = data.incoming.filter(d => matchesFilter(d.status, filter));
+  const out = data.outgoing.filter(d => matchesFilter(d.status, filter));
+  const counts = countByFilter([...data.incoming, ...data.outgoing].map(d => d.status).concat(bookedStatuses));
   const total = data.incoming.length + data.outgoing.length;
+  const nothing = total + bookedStatuses.length === 0;
+  const bookedShown = bookedStatuses.filter(s => matchesFilter(s, filter)).length;
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10" data-testid="dates-page">
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-6">
@@ -326,26 +335,29 @@ export default function InviteDates() {
         </div>
       </header>
 
-      {total === 0 ? (booked ? null : <EmptyDates />) : (
+      {nothing ? <EmptyDates /> : <FilterBar value={filter} onChange={setFilter} counts={counts} />}
+      {!nothing && inc.length + out.length + bookedShown === 0 && <EmptyLine text={t("df_no_match", lang)} />}
+
+      {inc.length + out.length > 0 && (
         <div className="grid md:grid-cols-2 gap-8">
           <section data-testid="incoming-dates">
-            <SectionTitle label={t("id_incoming", lang)} count={data.incoming.length} />
+            <SectionTitle label={t("id_incoming", lang)} count={inc.length} />
             <div className="space-y-3">
-              {data.incoming.map(d => <DateCard key={d.id} d={d} reload={load} />)}
-              {!data.incoming.length && <EmptyLine text={t("id_no_incoming", lang)} />}
+              {inc.map(d => <DateCard key={d.id} d={d} reload={load} />)}
+              {!inc.length && <EmptyLine text={t(filter === "all" ? "id_no_incoming" : "df_no_match", lang)} />}
             </div>
           </section>
           <section data-testid="outgoing-dates">
-            <SectionTitle label={t("id_outgoing", lang)} count={data.outgoing.length} />
+            <SectionTitle label={t("id_outgoing", lang)} count={out.length} />
             <div className="space-y-3">
-              {data.outgoing.map(d => <DateCard key={d.id} d={d} reload={load} />)}
-              {!data.outgoing.length && <EmptyLine text={t("id_no_outgoing", lang)} />}
+              {out.map(d => <DateCard key={d.id} d={d} reload={load} />)}
+              {!out.length && <EmptyLine text={t(filter === "all" ? "id_no_outgoing" : "df_no_match", lang)} />}
             </div>
           </section>
         </div>
       )}
 
-      <div className={total ? "mt-10" : ""}><DateBookingList mode="regular" onCount={setBooked} /></div>
+      <div className={inc.length + out.length ? "mt-10" : ""}><DateBookingList mode="regular" onItems={setBookedStatuses} filter={filter} /></div>
       <CancelledDates />
     </div>
   );

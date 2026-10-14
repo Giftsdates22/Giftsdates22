@@ -10,6 +10,8 @@ import { MapsLink } from "./AddressPicker";
 import AddressPicker from "./AddressPicker";
 import AddToCalendar from "./AddToCalendar";
 import { SectionTitle, EmptyLine } from "./DatesUI";
+import CountdownBadge from "./CountdownBadge";
+import { matchesFilter } from "../lib/dateFilters";
 
 const STATUS_MAP = { escrow: "status_escrow", accepted: "status_accepted", confirmed: "status_confirmed", released: "status_released", cancelled: "status_cancelled", declined: "status_declined" };
 const STATUS_COLOR = { escrow: "bg-amber-500/15 text-amber-300 border-amber-500/30", accepted: "bg-sky-500/15 text-sky-300 border-sky-500/30", confirmed: "bg-violet-500/15 text-violet-300 border-violet-500/30", released: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30", cancelled: "bg-red-500/15 text-red-300 border-red-500/30", declined: "bg-red-500/15 text-red-300 border-red-500/30" };
@@ -19,7 +21,7 @@ const STATUS_COLOR = { escrow: "bg-amber-500/15 text-amber-300 border-amber-500/
  * mode="regular" → shows only non-VIP bookings (standard dates).
  * mode="vip"     → shows only VIP bookings (booked via a member's VIP section).
  */
-export default function DateBookingList({ mode = "regular", onCount }) {
+export default function DateBookingList({ mode = "regular", onItems, filter = "all" }) {
   const { lang, refreshUser, meta } = useApp();
   const pct = Math.round((meta?.cancel_refund_pct ?? 0.5) * 100);
   const [data, setData] = useState({ outgoing: [], incoming: [] });
@@ -39,7 +41,9 @@ export default function DateBookingList({ mode = "regular", onCount }) {
   const outgoing = (data.outgoing || []).filter(matches);
   const all = [...incoming.map(b => ({ b, inc: true })), ...outgoing.map(b => ({ b, inc: false }))]
     .sort((x, y) => String(x.b.scheduled_at).localeCompare(String(y.b.scheduled_at)));
-  useEffect(() => { onCount?.(all.length); }, [all.length]); // eslint-disable-line
+  const statusKey = all.map(x => x.b.status).join(",");
+  useEffect(() => { onItems?.(all.map(x => x.b.status)); }, [statusKey]); // eslint-disable-line
+  const shown = all.filter(x => matchesFilter(x.b.status, filter));
 
   const cancel = async (b, isRecipient) => {
     const tcoins = b.taxi?.status === "sent" ? (b.taxi?.coins || 0) : 0;
@@ -135,6 +139,7 @@ export default function DateBookingList({ mode = "regular", onCount }) {
         {b.meet?.address && <div className="text-xs text-emerald-300 mt-0.5" data-testid={`meet-location-${b.id}`}>📍 {t("meet_location", lang)}: {[b.meet.address, b.meet.postal_code, b.meet.country].filter(Boolean).join(" · ")} <MapsLink loc={{ ...b.meet, venue: b.venue }} testid={`meet-maps-link-${b.id}`} /></div>}
         <div className="mt-1 flex items-center gap-2 flex-wrap">
           <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_COLOR[b.status]}`}>{t(STATUS_MAP[b.status], lang)}</span>
+          {["accepted", "confirmed"].includes(b.status) && <CountdownBadge to={b.scheduled_at} testid={`date-countdown-${b.id}`} />}
           <span data-testid={`date-role-${b.id}`} className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400">{t(isIncoming ? "tag_invited_you" : "tag_you_booked", lang)}</span>
           <span className="text-xs text-amber-300 font-mono-num">🪙 {b.coins}</span>
           {b.release_at && b.status === "confirmed" && <span className="text-xs text-slate-500">🔓 {t("unlocks_at", lang)}: {new Date(b.release_at).toLocaleString()}</span>}
@@ -275,10 +280,10 @@ export default function DateBookingList({ mode = "regular", onCount }) {
     <>
       <input ref={inputRef} data-testid="photo-verification-upload-input" type="file" accept="image/*" onChange={handleFile} className="hidden"/>
       {all.length === 0 && mode === "vip" && <EmptyLine text={t("none", lang)} />}
-      {all.length > 0 && (
+      {shown.length > 0 && (
         <section data-testid="booked-dates-section">
-          <SectionTitle label={t("booked_dates", lang)} count={all.length} />
-          <div className="space-y-3">{all.map(({ b, inc }) => <Row key={b.id} b={b} isIncoming={inc} />)}</div>
+          <SectionTitle label={t("booked_dates", lang)} count={shown.length} />
+          <div className="space-y-3">{shown.map(({ b, inc }) => <Row key={b.id} b={b} isIncoming={inc} />)}</div>
         </section>
       )}
     </>

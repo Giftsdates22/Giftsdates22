@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { CalendarHeart, ArrowRight } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
+import { DATE_FILTERS } from "../lib/dateFilters";
 
 export const SectionTitle = ({ label, count }) => (
   <div className="flex items-center gap-2 mb-4">
@@ -36,6 +37,21 @@ export function EmptyDates() {
         className="mt-6 inline-flex items-center gap-2 h-10 px-5 rounded-full rose-btn text-white text-sm transition-transform hover:-translate-y-0.5">
         {t("dates_empty_cta", lang)} <ArrowRight size={15} />
       </button>
+    </div>
+  );
+}
+
+export function FilterBar({ value, onChange, counts }) {
+  const { lang } = useApp();
+  return (
+    <div className="flex flex-wrap gap-2 mb-8" role="tablist" data-testid="dates-filter-bar">
+      {DATE_FILTERS.map(f => (
+        <button key={f} type="button" role="tab" aria-selected={value === f} onClick={() => onChange(f)} data-testid={`dates-filter-${f}`}
+          className={`inline-flex items-center gap-2 h-9 px-4 rounded-full text-sm border transition-colors ${value === f ? "bg-rose-500 border-rose-500 text-white" : "bg-white/[0.03] border-white/10 text-slate-300 hover:bg-white/10 hover:text-white"}`}>
+          {t(`df_${f}`, lang)}
+          <span className={`text-[11px] font-mono-num px-1.5 rounded-full ${value === f ? "bg-white/20" : "bg-white/10 text-slate-400"}`}>{counts[f] || 0}</span>
+        </button>
+      ))}
     </div>
   );
 }
