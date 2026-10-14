@@ -2,7 +2,7 @@ import React from "react";
 import { CalendarClock, Moon, Repeat } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
-import { toKey, fromKey, freeStarts, crossesMidnight } from "../lib/availability";
+import { toKey, fromKey, freeStarts, freeRanges, crossesMidnight } from "../lib/availability";
 
 const wdName = (i, lang) => new Date(2024, 0, 1 + i).toLocaleDateString(lang, { weekday: "short" }); // 1 Jan 2024 = Mon
 const Range = ({ w }) => (
@@ -19,7 +19,7 @@ export default function AvailabilityOverview({ avail, selected, onPick, max = 14
   const weekly = Object.entries(avail.weekly || {}).filter(([, r]) => r?.length).sort(([a], [b]) => a - b);
   const days = Object.entries(avail.day_windows || {})
     .filter(([k]) => k >= today && !busy.has(k))
-    .map(([k, wins]) => ({ k, wins, taken: (avail.busy_slots || {})[k] || [], n: freeStarts(wins, (avail.busy_slots || {})[k] || []).length }))
+    .map(([k, w]) => { const taken = (avail.busy_slots || {})[k] || []; return { k, wins: freeRanges(w, taken), n: freeStarts(w, taken).length }; })
     .filter(d => d.n > 0).sort((a, b) => a.k.localeCompare(b.k)).slice(0, max);
 
   if (!avail.restricted) return <div className="text-xs text-emerald-200" data-testid={`${testid}-open`}>{t("ao_open_any", lang)}</div>;
@@ -37,14 +37,13 @@ export default function AvailabilityOverview({ avail, selected, onPick, max = 14
         <div className="text-slate-400 mb-1.5 flex items-center gap-1"><CalendarClock size={11} />{t("ao_next_open", lang)}</div>
         {!days.length ? <div className="text-slate-500" data-testid={`${testid}-none`}>{t("no_slots", lang)}</div> : (
           <div className="divide-y divide-white/5 rounded-xl border border-white/10 max-h-72 overflow-y-auto">
-            {days.map(({ k, wins, taken, n }) => {
+            {days.map(({ k, wins, n }) => {
               const Tag = onPick ? "button" : "div";
               return (
                 <Tag key={k} type={onPick ? "button" : undefined} onClick={onPick ? () => onPick(k) : undefined} data-testid={`${testid}-day-${k}`}
                   className={`w-full text-left flex flex-wrap items-center gap-2 px-3 py-2 transition-colors ${selected === k ? "bg-rose-500/15" : onPick ? "hover:bg-white/5" : ""}`}>
                   <span className="w-24 shrink-0 text-slate-200">{fromKey(k).toLocaleDateString(lang, { weekday: "short", day: "numeric", month: "short" })}</span>
                   <span className="flex flex-wrap gap-1.5 flex-1">{wins.map((w, i) => <Range key={i} w={w} />)}
-                    {taken.map((b, i) => <span key={`b${i}`} className="px-2 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/30 text-rose-300 font-mono-num text-[11px] whitespace-nowrap" title={t("slot_booked", lang)}><span className="line-through">{b.from}–{b.to}</span> {t("slot_booked", lang)}</span>)}
                   </span>
                   <span className="text-slate-500 whitespace-nowrap">{t("ao_starts", lang).replace("{n}", n)}</span>
                 </Tag>

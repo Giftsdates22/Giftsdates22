@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
-import { toKey, fromKey, minHm, dayWins } from "../lib/availability";
+import { toKey, fromKey, minHm, dayWins, openDayKeys } from "../lib/availability";
 import TimeChooser from "./TimeChooser";
 import AvailabilityOverview from "./AvailabilityOverview";
 import AddressPicker from "./AddressPicker";
@@ -78,13 +78,12 @@ export default function DateBookingModal({ open, onOpenChange, target }) {
             <Label className="text-xs text-slate-400">{t("pick_day", lang)}</Label>
             <div className="mt-1 rounded-xl border border-white/10 bg-white/5" data-testid="date-calendar">
               <Calendar key={day ? day.slice(0, 7) : "now"} defaultMonth={day ? fromKey(day) : undefined} mode="single" selected={day ? fromKey(day) : undefined} onSelect={(d) => d && setDay(toKey(d))} disabled={isDisabled}
-                modifiers={{ busy: avail.busy_days.map(fromKey), available: Object.keys(avail.day_windows || {}).map(fromKey) }}
-                modifiersClassNames={{ busy: "line-through text-rose-400/70", available: "ring-1 ring-emerald-400/50 rounded-md" }}
+                modifiers={{ available: openDayKeys(avail).map(fromKey) }}
+                modifiersClassNames={{ available: "ring-1 ring-emerald-400/50 rounded-md" }}
                 classNames={{ day_selected: "bg-rose-500 text-white hover:bg-rose-500 focus:bg-rose-500" }} />
             </div>
             <div className="flex gap-3 mt-2 text-[11px] text-slate-400">
               <span><span className="inline-block w-2.5 h-2.5 rounded-sm ring-1 ring-emerald-400/60 me-1" />{t("availability", lang)}</span>
-              <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-rose-400/50 me-1" />{t("busy_day", lang)} / {t("unavailable_day", lang)}</span>
             </div>
             <div className="mt-4">
               <Label className="text-xs text-slate-400">{t("pick_start_time", lang)}{day ? ` · ${day}` : ""}</Label>

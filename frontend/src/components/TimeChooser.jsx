@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from "react";
 import { Clock, Moon } from "lucide-react";
 import ClockTimePicker from "./ClockTimePicker";
-import { freeStarts, quickSlots, minHm, SLOT, crossesMidnight } from "../lib/availability";
+import { freeStarts, freeRanges, quickSlots, minHm, SLOT, crossesMidnight } from "../lib/availability";
 import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
 
@@ -25,7 +25,7 @@ export default function TimeChooser({ wins = [], taken = [], value, onChange, te
         <div>
           <div className="text-slate-400 mb-1 flex items-center gap-1"><Clock size={11} /> {t("av_open_hours", lang)}</div>
           <div className="flex flex-wrap gap-1.5">
-            {wins.map((w, i) => <span key={i} className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 font-mono-num">{w.from}–{w.to}{crossesMidnight(w) && <Moon size={10} className="inline ml-1" />}</span>)}
+            {freeRanges(wins, taken).map((w, i) => <span key={i} className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 font-mono-num">{w.from}–{w.to}{crossesMidnight(w) && <Moon size={10} className="inline ml-1" />}</span>)}
           </div>
         </div>
         {quick.length > 0 && (

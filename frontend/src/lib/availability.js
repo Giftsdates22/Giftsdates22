@@ -39,3 +39,18 @@ export const dayWins = (avail, key) => {
   if (w) return w;
   return avail?.restricted ? [] : [{ from: "00:00", to: "00:00" }];
 };
+
+// Free time ranges left after removing booked/locked blocks (only where a full date fits).
+export const freeRanges = (wins = [], taken = []) => {
+  const out = [];
+  freeStarts(wins, taken).forEach(st => {
+    const last = out[out.length - 1];
+    if (last && st - last.s <= STEP) { last.s = st; last.e = st + SLOT; }
+    else out.push({ f: st, s: st, e: st + SLOT });
+  });
+  return out.map(r => ({ from: minHm(r.f), to: minHm(r.e) }));
+};
+
+// Days (keys) that still have at least one free start time.
+export const openDayKeys = (avail) =>
+  Object.entries(avail?.day_windows || {}).filter(([k, w]) => freeStarts(w, (avail.busy_slots || {})[k] || []).length).map(([k]) => k);
