@@ -56,6 +56,25 @@ function DateChat({ did, meId, lang }) {
   );
 }
 
+function SwitchToTaxi({ d, busy, onSend }) {
+  const { lang } = useApp();
+  const tr = (k, vars) => { let s = t(k, lang); if (vars) Object.entries(vars).forEach(([n, v]) => (s = s.replace(`{${n}}`, v))); return s; };
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState(String(d.transportation?.taxi_amount || ""));
+  const n = parseInt(amount) || 0;
+  if (!open) return <Button data-testid={`date-switch-taxi-${d.id}`} disabled={busy} onClick={() => setOpen(true)} variant="outline" className="h-9 bg-amber-500/10 border-amber-500/40 text-amber-200 hover:bg-amber-500/20"><Car size={14} className="me-1" />{tr("sw_btn")}</Button>;
+  return (
+    <div className="w-full rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2" data-testid={`date-switch-taxi-panel-${d.id}`}>
+      <div className="text-xs text-amber-100">{tr("sw_hint")}</div>
+      <div className="flex flex-wrap gap-2 items-center">
+        <Input data-testid={`date-switch-taxi-amount-${d.id}`} type="number" min="1" value={amount} onChange={e => setAmount(e.target.value)} placeholder={tr("id_taxi_amount_ph")} className="bg-white/5 border-white/10 h-9 max-w-[160px]" />
+        <Button data-testid={`date-switch-taxi-send-${d.id}`} disabled={busy || n <= 0} onClick={() => window.confirm(tr("sw_confirm", { n })) && onSend(n)} className="rose-btn text-white border-0 h-9">{tr("sw_send")} 🪙{n || ""}</Button>
+        <Button data-testid={`date-switch-taxi-cancel-${d.id}`} disabled={busy} onClick={() => setOpen(false)} variant="ghost" className="h-9 text-slate-300">{tr("id_cancel")}</Button>
+      </div>
+    </div>
+  );
+}
+
 function Countdown({ to, label }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, []);
@@ -112,6 +131,7 @@ function DateCard({ d, reload }) {
 
   const act = async (fn) => { setBusy(true); try { await fn(); await reload(); } catch (e) { toast.error(e.response?.data?.detail || tr("failed")); } finally { setBusy(false); } };
   const post = (path, body) => api.post(`/invites/${d.id}${path}`, body);
+  const cancelLocked = !!d.location?.scheduled_start && Date.now() >= new Date(d.location.scheduled_start).getTime() - 30 * 60000;
 
   const refuseSplit = () => {
     const total = Number(d.total_hold || d.coins || 0);
@@ -274,6 +294,7 @@ function DateCard({ d, reload }) {
             </div>
           </div>
         )}
+        {d.status === "DATE_CONFIRMED" && isInv && d.transportation?.type === "pickup" && !cancelLocked && <SwitchToTaxi d={d} busy={busy} onSend={(amount) => act(async () => { await post("/pickup/switch-to-taxi", { amount }); toast.success(tr("sw_sent_toast", { n: amount })); })} />}
         {!TERMINAL.includes(d.status) && d.status !== "PHOTO_VERIFICATION_PENDING" && !(d.status === "INVITATION_SENT" && !isInv) && (
           <Button data-testid={`date-cancel-${d.id}`} disabled={busy} onClick={cancelDate} variant="outline" className="h-9 bg-rose-500/10 border-rose-500/40 text-rose-300 hover:bg-rose-500/20"><X size={14} className="me-1" />{tr("id_cancel_date")}</Button>
         )}
