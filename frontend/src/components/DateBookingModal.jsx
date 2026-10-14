@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { api } from "../lib/api";
 import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
-import { toKey, fromKey } from "./AvailabilityCalendar";
+import { toKey, fromKey, minHm, dayWins } from "../lib/availability";
+import TimeChooser from "./TimeChooser";
 import AddressPicker from "./AddressPicker";
 
 export default function DateBookingModal({ open, onOpenChange, target }) {
@@ -17,7 +18,7 @@ export default function DateBookingModal({ open, onOpenChange, target }) {
   const [city, setCity] = useState(target?.city || "");
   const [loc, setLoc] = useState({ address: "", postal_code: "", country: target?.country || "", lat: null, lng: null });
   const [day, setDay] = useState(null);
-  const [time, setTime] = useState("19:00");
+  const [start, setStart] = useState(null);
   const [coins, setCoins] = useState(target?.date_price || meta?.date_min_coins || 300);
   const [activities, setActivities] = useState(["", "", ""]);
   const [avail, setAvail] = useState({ available_days: [], busy_days: [] });
@@ -29,54 +30,25 @@ export default function DateBookingModal({ open, onOpenChange, target }) {
   }, [target, meta, open]);
 
   const busySet = new Set(avail.busy_days);
-  const availSet = new Set(avail.available_days);
-  const win = day ? ((avail.slots || {})[day] || avail.time_window) : avail.time_window;
-  // Build 2.5-hour slots from the availability window (matches backend gen_slots). Windows whose
-  // end is <= start run past midnight into the next day.
-  const hmMin = (s) => { const [h, m] = String(s || "0:0").split(":").map(Number); return (h || 0) * 60 + (m || 0); };
-  const minHm = (x) => { const v = ((x % 1440) + 1440) % 1440; return `${String(Math.floor(v / 60)).padStart(2, "0")}:${String(v % 60).padStart(2, "0")}`; };
-  const genSlots = (w) => {
-    const start = hmMin(w?.from || "18:00"); let end = hmMin(w?.to || "23:00"); if (end <= start) end += 1440;
-    const out = []; for (let s = start; s + 150 <= end; s += 150) out.push({ from: minHm(s), to: minHm(s + 150), nextDay: s + 150 >= 1440 });
-    return out;
-  };
-  const daySlots = day ? genSlots(win) : [];
-  const dayBusy = (avail.busy_slots || {})[day] || [];
-  // A slot is unavailable if it overlaps a booked date's locked window (date +/- 15-min buffer).
-  // Normalise past-midnight ranges so end always sits after start before comparing.
-  const slotBusy = (s) => {
-    let sf = hmMin(s.from), st = hmMin(s.to); if (st <= sf) st += 1440;
-    return dayBusy.some(b => {
-      let bf = hmMin(b.lock_from || b.from), bt = hmMin(b.lock_to || b.to); if (bt <= bf) bt += 1440;
-      return bf < st && sf < bt;
-    });
-  };
-  const timeOk = daySlots.some(s => s.from === time && !slotBusy(s));
+  const wins = dayWins(avail, day);
+  const taken = (avail.busy_slots || {})[day] || [];
+  const timeOk = day && start != null;
   const isDisabled = (d) => {
     const k = toKey(d);
     if (d < new Date(new Date().setHours(0, 0, 0, 0))) return true;
     if (busySet.has(k)) return true;
-    if (availSet.size && !availSet.has(k)) return true;
-    return false;
+    return !dayWins(avail, k).length;
   };
 
-  // When a day is chosen, auto-select the first available 3-hour slot
-  useEffect(() => {
-    if (!day) return;
-    const first = daySlots.find(s => !slotBusy(s));
-    if (first) setTime(first.from);
-  }, [day, avail]); // eslint-disable-line
-
   const submit = async () => {
-    if (!venue || !day) { toast.error(t("fill_all", lang)); return; }
+    if (!venue || !timeOk) { toast.error(t("fill_all", lang)); return; }
     const acts = activities.map(a => a.trim());
     if (acts.some(a => !a)) { toast.error(t("activities_required_err", lang)); return; }
     if (user.coins < coins) { toast.error(t("not_enough_coins", lang)); return; }
     setBusy(true);
     try {
-      const [h, m] = time.split(":").map(Number);
-      const dt = fromKey(day); dt.setHours(h || 0, m || 0, 0, 0);
-      await api.post("/dates/book", { target_id: target.id, venue, city, scheduled_at: dt.toISOString(), coins, local_time: time, address: loc.address, postal_code: loc.postal_code, country: loc.country, lat: loc.lat, lng: loc.lng, activities: acts });
+      const dt = fromKey(day); dt.setHours(0, start, 0, 0);
+      await api.post("/dates/book", { target_id: target.id, venue, city, scheduled_at: dt.toISOString(), coins, local_time: minHm(start), local_day: day, address: loc.address, postal_code: loc.postal_code, country: loc.country, lat: loc.lat, lng: loc.lng, activities: acts });
       await refreshUser();
       toast.success(t("date_booked", lang));
       onOpenChange(false);
@@ -94,20 +66,26 @@ export default function DateBookingModal({ open, onOpenChange, target }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#161320] border-white/10 text-white max-w-2xl">
+      <DialogContent className="bg-[#161320] border-white/10 text-white max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle className="font-serif-luxe text-2xl">{t("book_date", lang)} · {target?.name}</DialogTitle></DialogHeader>
         <div className="grid sm:grid-cols-[auto_1fr] gap-5">
           <div>
             <Label className="text-xs text-slate-400">{t("pick_day", lang)}</Label>
             <div className="mt-1 rounded-xl border border-white/10 bg-white/5" data-testid="date-calendar">
               <Calendar mode="single" selected={day ? fromKey(day) : undefined} onSelect={(d) => d && setDay(toKey(d))} disabled={isDisabled}
-                modifiers={{ busy: avail.busy_days.map(fromKey), available: avail.available_days.map(fromKey) }}
+                modifiers={{ busy: avail.busy_days.map(fromKey), available: Object.keys(avail.day_windows || {}).map(fromKey) }}
                 modifiersClassNames={{ busy: "line-through text-rose-400/70", available: "ring-1 ring-emerald-400/50 rounded-md" }}
                 classNames={{ day_selected: "bg-rose-500 text-white hover:bg-rose-500 focus:bg-rose-500" }} />
             </div>
             <div className="flex gap-3 mt-2 text-[11px] text-slate-400">
               <span><span className="inline-block w-2.5 h-2.5 rounded-sm ring-1 ring-emerald-400/60 me-1" />{t("availability", lang)}</span>
               <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-rose-400/50 me-1" />{t("busy_day", lang)} / {t("unavailable_day", lang)}</span>
+            </div>
+            <div className="mt-4">
+              <Label className="text-xs text-slate-400">{t("pick_start_time", lang)}{day ? ` · ${day}` : ""}</Label>
+              <p className="text-[11px] text-amber-300/80 mt-0.5" data-testid="date-buffer-note">🔒 {t("buffer_note", lang)}</p>
+              {!day ? <div className="mt-2 text-xs text-slate-500">{t("pick_day", lang)}…</div>
+                : <TimeChooser key={day} wins={wins} taken={taken} value={start} onChange={setStart} testid="date-time" />}
             </div>
           </div>
           <div className="space-y-3">
@@ -126,37 +104,6 @@ export default function DateBookingModal({ open, onOpenChange, target }) {
             <div>
               <Label className="text-xs text-slate-400">{t("when", lang)}</Label>
               <div data-testid="date-selected-day" className="mt-1 h-10 flex items-center px-3 rounded-md bg-white/5 border border-white/10 text-sm font-mono-num">{day || "—"}</div>
-            </div>
-            <div>
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-slate-400">{t("pick_slot", lang)}</Label>
-                {win ? <span className="text-emerald-300 text-[11px]" data-testid="date-time-window">({win.from}–{win.to})</span> : null}
-              </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">{t("slot_hours_note", lang)}</p>
-              <p className="text-[11px] text-amber-300/80 mt-0.5" data-testid="date-buffer-note">🔒 {t("buffer_note", lang)}</p>
-              {!day ? (
-                <div className="mt-2 text-xs text-slate-500">{t("pick_day", lang)}…</div>
-              ) : daySlots.length === 0 ? (
-                <div className="mt-2 text-xs text-slate-500" data-testid="date-no-slots">{t("no_slots", lang)}</div>
-              ) : (
-                <div className="mt-2 grid grid-cols-3 gap-2" data-testid="date-slot-grid">
-                  {daySlots.map(s => {
-                    const taken = slotBusy(s);
-                    const active = time === s.from && !taken;
-                    return (
-                      <button key={s.from} type="button" disabled={taken} onClick={() => setTime(s.from)}
-                        data-testid={`date-slot-${s.from}`}
-                        className={`rounded-lg border px-2 py-2 text-xs font-mono-num transition-colors ${
-                          taken ? "bg-rose-500/10 border-rose-500/30 text-rose-300/60 line-through cursor-not-allowed"
-                          : active ? "bg-rose-500 border-rose-500 text-white"
-                          : "bg-white/5 border-white/10 text-slate-200 hover:bg-white/10"}`}>
-                        <div>{s.from}–{s.to}{s.nextDay ? <span className="ml-0.5 text-sky-300/90">+1</span> : ""}</div>
-                        {taken && <div className="text-[9px] mt-0.5 no-underline">{t("slot_booked", lang)}</div>}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
             </div>
             <div data-testid="date-activities">
               <Label className="text-xs text-slate-400">{t("date_ideas_label", lang)}</Label>

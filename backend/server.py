@@ -578,6 +578,8 @@ class ProfileUpdate(BaseModel):
     availability: Optional[List[str]] = None  # ISO dates YYYY-MM-DD when user is open for dates
     availability_time: Optional[dict] = None  # {"from": "18:00", "to": "23:00"} default window
     availability_slots: Optional[dict] = None  # {"YYYY-MM-DD": {"from": "..", "to": ".."}} per-day overrides
+    availability_ranges: Optional[dict] = None  # {"YYYY-MM-DD": [{"from","to"}, ...]} multiple ranges per specific day
+    availability_weekly: Optional[dict] = None  # {"0".."6" (Mon..Sun): [{"from","to"}, ...]} recurring weekly
     sms_notifications_enabled: Optional[bool] = None
 
 class LikeReq(BaseModel):
@@ -604,6 +606,7 @@ class DateBookingReq(BaseModel):
     scheduled_at: str  # ISO
     coins: int
     local_time: Optional[str] = None  # HH:MM in booker's local time, used for availability window check
+    local_day: Optional[str] = None  # YYYY-MM-DD availability day the slot belongs to
     address: Optional[str] = ""
     postal_code: Optional[str] = ""
     country: Optional[str] = ""
@@ -1041,6 +1044,13 @@ async def update_me(patch: ProfileUpdate, user=Depends(get_current_user)):
     if "availability_time" in upd and upd["availability_time"] and not _win_ok(upd["availability_time"]): raise HTTPException(400, "Invalid time window")
     if "availability_slots" in upd:
         upd["availability_slots"] = {k[:10]: v for k, v in (upd["availability_slots"] or {}).items() if re.fullmatch(r"\d{4}-\d{2}-\d{2}", k[:10]) and _win_ok(v)}
+    def _ranges_ok(lst): return [{"from": w["from"], "to": w["to"]} for w in (lst or [])[:8] if _win_ok(w)]
+    if "availability_ranges" in upd:
+        upd["availability_ranges"] = {k[:10]: r for k, v in (upd["availability_ranges"] or {}).items()
+                                      if re.fullmatch(r"\d{4}-\d{2}-\d{2}", k[:10]) and (r := _ranges_ok(v))}
+    if "availability_weekly" in upd:
+        upd["availability_weekly"] = {k: r for k, v in (upd["availability_weekly"] or {}).items()
+                                      if k in {"0", "1", "2", "3", "4", "5", "6"} and (r := _ranges_ok(v))}
     by, bm, bd = upd.pop("birth_year", None), upd.pop("birth_month", None), upd.pop("birth_day", None)
     if by and bm and bd:
         upd["birth_date"] = f"{int(by):04d}-{int(bm):02d}-{int(bd):02d}"
@@ -1619,7 +1629,11 @@ async def list_profiles(
         # Multi-select: comma-separated zodiac signs, match ANY
         zlist = [z.strip() for z in zodiac.split(",") if z.strip() and z.strip() != "all"]
         if zlist: conds.append({"zodiac": {"$in": zlist}})
-    if available_date: conds.append({"availability": available_date})
+    if available_date:
+        try: _wd = str(datetime.fromisoformat(available_date[:10]).weekday())
+        except ValueError: _wd = "x"
+        conds.append({"$or": [{"availability": available_date}, {f"availability_ranges.{available_date[:10]}.0": {"$exists": True}},
+                              {f"availability_weekly.{_wd}.0": {"$exists": True}}]})
     if video_calls: conds.append({"video_calls_enabled": {"$ne": False}})
     if hobby: conds.append({"hobbies": {"$elemMatch": {"$regex": re.escape(hobby), "$options": "i"}}})
     if hobbies:
@@ -2550,6 +2564,50 @@ def _win_end_min(win):
         end += 24 * 60
     return start, end
 
+AVAIL_FIELDS = {"availability": 1, "availability_time": 1, "availability_slots": 1, "availability_ranges": 1, "availability_weekly": 1}
+START_STEP = 15  # inviter can start a date on any 15-minute mark
+
+def day_windows(u, day):
+    """Time ranges a user is open on `day`. None = no restriction set; [] = unavailable."""
+    ranges = (u.get("availability_ranges") or {}).get(day)
+    if ranges: return ranges
+    days = u.get("availability") or []
+    if day in days:
+        w = (u.get("availability_slots") or {}).get(day) or u.get("availability_time")
+        return [w] if w else None
+    weekly = u.get("availability_weekly") or {}
+    try: wd = str(datetime.fromisoformat(day).weekday())
+    except ValueError: return []
+    if weekly.get(wd): return weekly[wd]
+    if days or u.get("availability_ranges") or any(weekly.values()): return []
+    w = u.get("availability_time")
+    return [w] if w else None
+
+def fit_start(wins, start_min):
+    """Effective start minute (may be >=1440 for after-midnight) if a full date fits in one window, else None."""
+    for w in wins:
+        ws, we = _win_end_min(w)
+        s = start_min + 24 * 60 if (we > 24 * 60 and start_min < ws) else start_min
+        if ws <= s and s + DATE_SLOT_MINUTES <= we: return s
+    return None
+
+def wins_label(wins): return ", ".join(f"{w['from']}-{w['to']}" for w in wins)
+
+def free_starts(wins, taken):
+    """All valid start minutes (15-min steps) that fit a window and avoid taken lock blocks."""
+    def _lock(t):
+        lf, lt = _hm_to_min(t["lock_from"]), _hm_to_min(t["lock_to"])
+        return lf, lt + 24 * 60 if lt <= lf else lt
+    locks = [_lock(t) for t in taken]
+    out = []
+    for w in wins:
+        ws, we = _win_end_min(w)
+        s = ws + (-ws % START_STEP)
+        while s + DATE_SLOT_MINUTES <= we:
+            if not any(lf < s + DATE_SLOT_MINUTES and s < lt for lf, lt in locks): out.append(s)
+            s += START_STEP
+    return out
+
 def gen_slots(win):
     """Split an availability window into consecutive 2.5-hour slots.
     e.g. win 12:00-21:00 -> [12:00-14:30, 14:30-17:00, ...]. Windows whose
@@ -2596,28 +2654,20 @@ async def book_date(req: DateBookingReq, user=Depends(get_current_user)):
     if len(activities) != 3:
         raise HTTPException(400, "ACTIVITIES_REQUIRED")
     activities = [a[:120] for a in activities]
-    day = req.scheduled_at[:10]
-    if target.get("availability") and day not in target["availability"]: raise HTTPException(400, "DAY_UNAVAILABLE")
-    win = (target.get("availability_slots") or {}).get(day) or target.get("availability_time")
-    # Determine the requested start time (HH:MM)
+    day = (req.local_day or req.scheduled_at)[:10]
+    wins = day_windows(target, day)
+    if wins is not None and not wins: raise HTTPException(400, "DAY_UNAVAILABLE")
     try:
         local_t = datetime.fromisoformat(req.scheduled_at.replace("Z", "+00:00")).strftime("%H:%M") if req.local_time is None else req.local_time
     except Exception:
         local_t = req.local_time or "00:00"
     start_min = _hm_to_min(local_t)
-    if win:
-        # The chosen 2.5h date must fit inside the availability window (which may run past midnight).
-        win_start, win_end = _win_end_min(win)
-        eff_start = start_min
-        # An early-morning start time that falls after a past-midnight window belongs to the "next day" side.
-        if win_end > 24 * 60 and eff_start < win_start:
-            eff_start += 24 * 60
-        eff_end = eff_start + DATE_SLOT_MINUTES
-        if not (win_start <= eff_start and eff_end <= win_end):
-            raise HTTPException(400, f"TIME_UNAVAILABLE:{win['from']}-{win['to']}")
-        start_min, end_min = eff_start, eff_end
-    else:
-        end_min = start_min + DATE_SLOT_MINUTES
+    if wins:
+        # The full 2.5h date must fit inside one of the day's ranges (which may run past midnight).
+        eff = fit_start(wins, start_min)
+        if eff is None: raise HTTPException(400, f"TIME_UNAVAILABLE:{wins_label(wins)}")
+        start_min = eff
+    end_min = start_min + DATE_SLOT_MINUTES
     slot_from, slot_to = _min_to_hm(start_min), _min_to_hm(end_min)
     # 3-hour slot conflict check + 15-min buffer locked before AND after each date
     day_bookings = await db.date_bookings.find({"status": {"$in": ["escrow", "accepted", "confirmed"]},
@@ -2670,7 +2720,7 @@ async def respond_date(bid: str, accept: bool, selected_activity: Optional[str] 
 
 @api.get("/profiles/{pid}/availability")
 async def profile_availability(pid: str, user=Depends(get_current_user)):
-    p = await db.users.find_one({"id": pid}, {"_id": 0, "availability": 1, "availability_time": 1, "availability_slots": 1, "locked_slots": 1})
+    p = await db.users.find_one({"id": pid}, {"_id": 0, "locked_slots": 1, **AVAIL_FIELDS})
     if not p: raise HTTPException(404, "Not found")
     busy = await db.date_bookings.find({"status": {"$in": ["escrow", "accepted", "confirmed"]}, "$or": [{"to_id": pid}, {"from_id": pid}]},
                                        {"_id": 0, "scheduled_at": 1, "slot_from": 1, "slot_to": 1, "local_time": 1}).to_list(500)
@@ -2695,23 +2745,19 @@ async def profile_availability(pid: str, user=Depends(get_current_user)):
         block = {"from": _min_to_hm(sf), "to": _min_to_hm(et), "lock_from": _min_to_hm(sf), "lock_to": _min_to_hm(et), "locked": True}
         busy_slots.setdefault(d, []).append(block)
         locked_days.setdefault(d, []).append(block)
-    # a day is fully booked only when every generated slot is taken (incl. buffer)
-    fully_booked = []
-    for d, taken in busy_slots.items():
-        win = day_slots.get(d) or time_window
-        all_slots = gen_slots(win)
-        def _overlaps(s):
-            sf, st = _hm_to_min(s["from"]), _hm_to_min(s["to"])
-            if st <= sf: st += 24 * 60  # slot ends after midnight
-            def _t(t):
-                lf, lt = _hm_to_min(t["lock_from"]), _hm_to_min(t["lock_to"])
-                if lt <= lf: lt += 24 * 60
-                return lf, lt
-            return any((lambda lf, lt: lf < st and sf < lt)(*_t(t)) for t in taken)
-        if all_slots and all(_overlaps(s) for s in all_slots):
-            fully_booked.append(d)
-    return {"available_days": p.get("availability") or [], "busy_days": sorted(fully_booked),
+    # per-day open ranges for the next 120 days (specific days, weekly schedule or default window)
+    today = datetime.now(timezone.utc).date() - timedelta(days=1)
+    day_wins = {}
+    for n in range(121):
+        d = (today + timedelta(days=n)).isoformat()
+        w = day_windows(p, d)
+        if w: day_wins[d] = w
+    # a day is fully booked only when no free 15-min start time is left (incl. buffer)
+    fully_booked = sorted(d for d, taken in busy_slots.items() if (day_wins.get(d) or day_windows(p, d)) and not free_starts(day_wins.get(d) or day_windows(p, d), taken))
+    return {"available_days": p.get("availability") or [], "busy_days": fully_booked,
             "time_window": time_window, "slots": day_slots, "locked_days": locked_days,
+            "day_windows": day_wins, "restricted": day_windows(p, "1970-01-01") is not None, "weekly": p.get("availability_weekly") or {},
+            "start_step": START_STEP, "slot_minutes": DATE_SLOT_MINUTES,
             "busy_slots": busy_slots, "slot_hours": DATE_SLOT_HOURS, "buffer": DATE_BUFFER}
 
 @api.get("/dates")
@@ -4282,6 +4328,8 @@ class InviteCreateReq(BaseModel):
     activity_option_2: str
     activity_option_3: str
     scheduled_start: str  # ISO day+time the inviter picks from the recipient's availability
+    local_day: Optional[str] = None  # YYYY-MM-DD availability day chosen
+    local_time: Optional[str] = None  # HH:MM start in the inviter's local clock
     coins: int
     gift_id: Optional[str] = None
     safety_ack: bool = False
@@ -4313,18 +4361,15 @@ class InviteReportReq(BaseModel):
 class DateMsgReq(BaseModel):
     text: str
 
-async def _recipient_slot_or_400(rec, start_dt):
-    """Validate start_dt is a bookable 2.5h slot inside the recipient's availability and
+async def _recipient_slot_or_400(rec, start_dt, local_day=None, local_time=None):
+    """Validate start_dt is a bookable 2.5h date inside the recipient's availability and
     not already busy or locked. Returns (start_iso, end_iso) for the full 3h locked block."""
     if not start_dt: raise HTTPException(400, "Invalid start time")
-    day = start_dt.strftime("%Y-%m-%d")
-    avail_days = rec.get("availability") or []
-    if avail_days and day not in avail_days: raise HTTPException(400, "DAY_UNAVAILABLE")
-    win = (rec.get("availability_slots") or {}).get(day) or rec.get("availability_time")
-    start_min = start_dt.hour * 60 + start_dt.minute
-    date_end_min = start_min + DATE_SLOT_MINUTES  # 2.5h date must fit in the window
-    if win and not (_hm_to_min(win["from"]) <= start_min and date_end_min <= _hm_to_min(win["to"])):
-        raise HTTPException(400, f"TIME_UNAVAILABLE:{win['from']}-{win['to']}")
+    day = (local_day or start_dt.strftime("%Y-%m-%d"))[:10]
+    wins = day_windows(rec, day)
+    if wins is not None and not wins: raise HTTPException(400, "DAY_UNAVAILABLE")
+    if wins and fit_start(wins, _hm_to_min(local_time or start_dt.strftime("%H:%M"))) is None:
+        raise HTTPException(400, f"TIME_UNAVAILABLE:{wins_label(wins)}")
     block_end = start_dt + timedelta(hours=DATE_WINDOW_HOURS)
     for ls in (rec.get("locked_slots") or []):
         ls_s, ls_e = _pdt(ls.get("start")), _pdt(ls.get("end"))
@@ -4338,14 +4383,14 @@ async def _recipient_slot_or_400(rec, start_dt):
 async def create_invite(req: InviteCreateReq, user=Depends(get_current_user)):
     if req.recipient_id == user["id"]: raise HTTPException(400, "Cannot invite yourself")
     if not req.safety_ack: raise HTTPException(400, "SAFETY_ACK_REQUIRED")
-    rec = await db.users.find_one({"id": req.recipient_id}, {"_id": 0, "id": 1, "name": 1, "date_price": 1, "availability": 1, "availability_time": 1, "availability_slots": 1, "locked_slots": 1})
+    rec = await db.users.find_one({"id": req.recipient_id}, {"_id": 0, "id": 1, "name": 1, "date_price": 1, "locked_slots": 1, **AVAIL_FIELDS})
     if not rec: raise HTTPException(404, "Recipient not found")
     # 3 mandatory custom date-idea options typed by the inviter (no predefined catalog)
     opts_text = [(req.activity_option_1 or "").strip(), (req.activity_option_2 or "").strip(), (req.activity_option_3 or "").strip()]
     if any(not o for o in opts_text): raise HTTPException(400, "ACTIVITIES_REQUIRED")
     opts_text = [o[:120] for o in opts_text]
     # inviter picks a specific day + time from the recipient's availability
-    proposed_start, proposed_end = await _recipient_slot_or_400(rec, _pdt(req.scheduled_start))
+    proposed_start, proposed_end = await _recipient_slot_or_400(rec, _pdt(req.scheduled_start), req.local_day, req.local_time)
     floor = max(INVITE_MIN_COINS, int(rec.get("date_price") or 0))
     if req.coins < floor: raise HTTPException(400, f"MIN_COINS:{floor}")
     if ((user.get("coins") or 0) + (user.get("withdrawable") or 0)) < req.coins: raise HTTPException(400, "Insufficient coins")

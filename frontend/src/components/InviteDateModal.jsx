@@ -8,12 +8,8 @@ import { ShieldAlert, Sparkles, Clock } from "lucide-react";
 import { api } from "../lib/api";
 import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
-import { toKey, fromKey } from "./AvailabilityCalendar";
-
-const hmMin = (s) => { const [h, m] = String(s || "0:0").split(":").map(Number); return (h || 0) * 60 + (m || 0); };
-const minHm = (x) => { const v = ((x % 1440) + 1440) % 1440; return `${String(Math.floor(v / 60)).padStart(2, "0")}:${String(v % 60).padStart(2, "0")}`; };
-// Windows whose end is <= start run past midnight into the next day.
-const genSlots = (w) => { const start = hmMin(w?.from || "18:00"); let end = hmMin(w?.to || "23:00"); if (end <= start) end += 1440; const out = []; for (let s = start; s + 150 <= end; s += 150) out.push({ from: minHm(s), to: minHm(s + 150), nextDay: s + 150 >= 1440 }); return out; };
+import { toKey, fromKey, minHm, dayWins } from "../lib/availability";
+import TimeChooser from "./TimeChooser";
 
 export default function InviteDateModal({ open, onOpenChange, target }) {
   const { user, lang, refreshUser } = useApp();
@@ -25,37 +21,26 @@ export default function InviteDateModal({ open, onOpenChange, target }) {
   const [busy, setBusy] = useState(false);
   const [avail, setAvail] = useState({ available_days: [], busy_days: [] });
   const [day, setDay] = useState(null);
-  const [time, setTime] = useState("");
+  const [start, setStart] = useState(null);
 
   useEffect(() => {
     if (open) {
-      setActivities(["", "", ""]); setCoins(floor); setAck(false); setDay(null); setTime("");
+      setActivities(["", "", ""]); setCoins(floor); setAck(false); setDay(null); setStart(null);
       if (target?.id) api.get(`/profiles/${target.id}/availability`).then(r => setAvail(r.data)).catch(() => {});
     }
   }, [open]); // eslint-disable-line
 
   const setAct = (i, v) => setActivities(a => a.map((x, idx) => idx === i ? v : x));
   const busySet = new Set(avail.busy_days || []);
-  const availSet = new Set(avail.available_days || []);
-  const win = day ? ((avail.slots || {})[day] || avail.time_window) : avail.time_window;
-  const daySlots = day ? genSlots(win) : [];
-  const dayBusy = (avail.busy_slots || {})[day] || [];
-  const slotBusy = (s) => {
-    let sf = hmMin(s.from), st = hmMin(s.to); if (st <= sf) st += 1440;
-    return dayBusy.some(b => {
-      let bf = hmMin(b.lock_from || b.from), bt = hmMin(b.lock_to || b.to); if (bt <= bf) bt += 1440;
-      return bf < st && sf < bt;
-    });
-  };
+  const wins = dayWins(avail, day);
+  const taken = (avail.busy_slots || {})[day] || [];
   const isDisabled = (d) => {
     const k = toKey(d);
     if (d < new Date(new Date().setHours(0, 0, 0, 0))) return true;
     if (busySet.has(k)) return true;
-    if (availSet.size && !availSet.has(k)) return true;
-    return false;
+    return !dayWins(avail, k).length;
   };
-  useEffect(() => { if (!day) return; const first = daySlots.find(s => !slotBusy(s)); setTime(first ? first.from : ""); }, [day, avail]); // eslint-disable-line
-  const timeOk = daySlots.some(s => s.from === time && !slotBusy(s));
+  const timeOk = day && start != null;
 
   const send = async () => {
     const acts = activities.map(a => a.trim());
@@ -66,12 +51,11 @@ export default function InviteDateModal({ open, onOpenChange, target }) {
     if (((user?.coins || 0) + (user?.withdrawable || 0)) < coins) { toast.error(tr("not_enough_coins")); return; }
     setBusy(true);
     try {
-      const [h, m] = time.split(":").map(Number);
-      const dt = fromKey(day); dt.setHours(h || 0, m || 0, 0, 0);
+      const dt = fromKey(day); dt.setHours(0, start, 0, 0);
       await api.post("/invites", {
         recipient_id: target.id,
         activity_option_1: acts[0], activity_option_2: acts[1], activity_option_3: acts[2],
-        scheduled_start: dt.toISOString(), coins, safety_ack: true,
+        scheduled_start: dt.toISOString(), local_day: day, local_time: minHm(start), coins, safety_ack: true,
       });
       await refreshUser();
       toast.success(tr("iv_sent_success"));
@@ -103,42 +87,20 @@ export default function InviteDateModal({ open, onOpenChange, target }) {
           <span>{tr("iv_safety")}</span>
         </div>
 
-        {/* Pick a day + time from the invitee's availability */}
-        <div className="grid sm:grid-cols-[auto_1fr] gap-4">
-          <div>
-            <label className="text-xs text-slate-400">{tr("pick_day")}</label>
-            <div className="mt-1 rounded-xl border border-white/10 bg-white/5" data-testid="invite-calendar">
-              <Calendar mode="single" selected={day ? fromKey(day) : undefined} onSelect={(d) => d && setDay(toKey(d))} disabled={isDisabled}
-                modifiers={{ available: (avail.available_days || []).map(fromKey) }}
-                modifiersClassNames={{ available: "ring-1 ring-emerald-400/50 rounded-md" }}
-                classNames={{ day_selected: "bg-rose-500 text-white hover:bg-rose-500 focus:bg-rose-500" }} />
-            </div>
+        {/* Pick any open day, then any start time on the clock */}
+        <div>
+          <label className="block text-xs text-slate-400">{tr("pick_day")}</label>
+          <div className="mt-1 rounded-xl border border-white/10 bg-white/5 inline-block" data-testid="invite-calendar">
+            <Calendar mode="single" selected={day ? fromKey(day) : undefined} onSelect={(d) => d && setDay(toKey(d))} disabled={isDisabled}
+              modifiers={{ available: Object.keys(avail.day_windows || {}).map(fromKey) }}
+              modifiersClassNames={{ available: "ring-1 ring-emerald-400/50 rounded-md" }}
+              classNames={{ day_selected: "bg-rose-500 text-white hover:bg-rose-500 focus:bg-rose-500" }} />
           </div>
-          <div>
-            <div className="flex items-center justify-between">
-              <label className="text-xs text-slate-400 flex items-center gap-1"><Clock size={12} /> {tr("pick_slot")}</label>
-              {win ? <span className="text-emerald-300 text-[11px]" data-testid="invite-window">({win.from}–{win.to})</span> : null}
-            </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">{tr("slot_hours_note")}</p>
-            {!day ? (
-              <div className="mt-2 text-xs text-slate-500">{tr("pick_day")}…</div>
-            ) : daySlots.length === 0 ? (
-              <div className="mt-2 text-xs text-slate-500" data-testid="invite-no-slots">{tr("no_slots")}</div>
-            ) : (
-              <div className="mt-2 grid grid-cols-2 gap-2" data-testid="invite-slot-grid">
-                {daySlots.map(s => {
-                  const taken = slotBusy(s);
-                  const active = time === s.from && !taken;
-                  return (
-                    <button key={s.from} type="button" disabled={taken} onClick={() => setTime(s.from)} data-testid={`invite-slot-${s.from}`}
-                      className={`rounded-lg border px-2 py-2 text-xs font-mono-num transition-colors ${taken ? "bg-rose-500/10 border-rose-500/30 text-rose-300/60 line-through cursor-not-allowed" : active ? "bg-rose-500 border-rose-500 text-white" : "bg-white/5 border-white/10 text-slate-200 hover:bg-white/10"}`}>
-                      {s.from}–{s.to}{s.nextDay ? <span className="ml-0.5 text-sky-300/90">+1</span> : ""}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 flex items-center gap-1"><Clock size={12} /> {tr("pick_start_time")}{day ? ` · ${day}` : ""}</label>
+          {!day ? <div className="mt-2 text-xs text-slate-500">{tr("pick_day")}…</div>
+            : <TimeChooser key={day} wins={wins} taken={taken} value={start} onChange={setStart} testid="invite-time" />}
         </div>
 
         <div className="space-y-3" data-testid="invite-activities">

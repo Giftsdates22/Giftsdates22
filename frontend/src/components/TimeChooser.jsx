@@ -1,0 +1,48 @@
+import React, { useEffect, useMemo } from "react";
+import { Clock, Moon } from "lucide-react";
+import ClockTimePicker from "./ClockTimePicker";
+import { freeStarts, quickSlots, minHm, SLOT, crossesMidnight } from "../lib/availability";
+import { useApp } from "../context/AppContext";
+import { t } from "../lib/i18n";
+
+const fmt = (m) => `${minHm(m)}${m >= 1440 ? " +1" : ""}`;
+
+export default function TimeChooser({ wins = [], taken = [], value, onChange, testid = "time-chooser" }) {
+  const { lang } = useApp();
+  const starts = useMemo(() => freeStarts(wins, taken), [JSON.stringify(wins), JSON.stringify(taken)]); // eslint-disable-line
+  const quick = quickSlots(wins).filter(s => starts.includes(s));
+  useEffect(() => { if (!starts.includes(value)) onChange(starts[0] ?? null); }, [starts]); // eslint-disable-line
+
+  if (!starts.length) return <div className="mt-2 text-xs text-slate-500" data-testid={`${testid}-no-slots`}>{t("no_slots", lang)}</div>;
+  return (
+    <div className="mt-2 grid sm:grid-cols-[auto_1fr] gap-4 items-start" data-testid={testid}>
+      <ClockTimePicker starts={starts} value={value} onChange={onChange} />
+      <div className="space-y-3 text-xs">
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-3" data-testid={`${testid}-summary`}>
+          <div className="flex justify-between"><span className="text-slate-400">{t("clock_starts", lang)}</span><b className="font-mono-num text-white">{value == null ? "—" : fmt(value)}</b></div>
+          <div className="flex justify-between mt-1"><span className="text-slate-400">{t("clock_ends", lang)}</span><b className="font-mono-num text-white">{value == null ? "—" : fmt(value + SLOT)}</b></div>
+        </div>
+        <div>
+          <div className="text-slate-400 mb-1 flex items-center gap-1"><Clock size={11} /> {t("av_open_hours", lang)}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {wins.map((w, i) => <span key={i} className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 font-mono-num">{w.from}–{w.to}{crossesMidnight(w) && <Moon size={10} className="inline ml-1" />}</span>)}
+          </div>
+        </div>
+        {quick.length > 0 && (
+          <div>
+            <div className="text-slate-400 mb-1">{t("quick_slots", lang)}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {quick.map(s => (
+                <button key={s} type="button" onClick={() => onChange(s)} data-testid={`${testid}-quick-${minHm(s)}`}
+                  className={`px-2 py-1 rounded-md border font-mono-num transition-colors ${value === s ? "bg-rose-500 border-rose-500 text-white" : "bg-white/5 border-white/10 text-slate-200 hover:bg-white/10"}`}>
+                  {fmt(s)}–{fmt(s + SLOT)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <p className="text-[11px] text-slate-500">{t("any_time_note", lang)}</p>
+      </div>
+    </div>
+  );
+}

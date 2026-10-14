@@ -143,6 +143,21 @@ export const ZODIAC_EMOJI = {
 };
 
 const T = {
+  av_new_hint: { en: "Set a weekly schedule and/or pick specific days. Add as many time ranges per day as you like — people inviting you can choose any start time that fits." },
+  av_weekly: { en: "Weekly schedule" },
+  av_weekly_hint: { en: "Repeats every week. Specific days below override the weekly hours for that date." },
+  av_specific_days: { en: "Specific days" },
+  av_specific_hint: { en: "Click days on the calendar to open them, then edit their hours. Green-ringed days are already open from your weekly schedule." },
+  av_add_range: { en: "Add time range" },
+  av_closed: { en: "Unavailable" },
+  av_open_hours: { en: "Available hours" },
+  wd_0: { en: "Monday" }, wd_1: { en: "Tuesday" }, wd_2: { en: "Wednesday" }, wd_3: { en: "Thursday" },
+  wd_4: { en: "Friday" }, wd_5: { en: "Saturday" }, wd_6: { en: "Sunday" },
+  pick_start_time: { en: "Pick a start time" },
+  clock_starts: { en: "Date starts" },
+  clock_ends: { en: "Date ends" },
+  quick_slots: { en: "Quick picks (2.5h)" },
+  any_time_note: { en: "Tap an hour on the clock, then the minutes. Only start times where the full 2.5h date fits in their available hours can be chosen." },
   brand: { ru: "GiftsDates", en: "GiftsDates", es: "GiftsDates", fr: "GiftsDates", de: "GiftsDates", pt: "GiftsDates", zh: "GiftsDates", ar: "GiftsDates", hi: "GiftsDates", bn: "GiftsDates", ur: "GiftsDates" },
   tagline: {
     ru: "Знакомства без границ. Подарки, свидания и защита средств.",
