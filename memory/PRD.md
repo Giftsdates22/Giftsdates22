@@ -18,6 +18,7 @@ React (CRA/craco) + FastAPI (server.py, ~4.9k lines) + MongoDB. JWT email/passwo
 - Availability v2 (2026-10): owners set a weekly schedule + specific days, each with multiple time ranges (overnight supported). Inviters pick any open day and any 15-min start time on a clock picker (plus 2.5h quick chips); backend validates the full 2.5h fits a range and avoids booked/buffer blocks. Fixed Profile save crash (empty relationship_intent / 422 toast). iteration_3 + manual verification.
 - Copy weekly hours ("Copy to all days" per weekday) + Add to calendar dropdown (Google Calendar link; .ics with 1d/2h/30m reminders) on accepted/confirmed bookings and invite dates (2026-10).
 - Date reminders (2026-10): 24h + 1h in-app + email to both people for accepted/confirmed bookings and confirmed invite dates (invites' extra 3h/30m reminders removed; start/end notices in-app only). Atomic per-flag dedupe. Runs in the 60s lifecycle loop + platform cron `.emergent/crons.yml` (*/15 → /api/cron/tick). Email via Emergent-managed Resend (EMERGENT_EMAIL_KEY, EMAIL_FROM_NAME=GiftsDates, PUBLIC_APP_URL set to preview URL).
+- Dates page cleanup (2026-10): removed "Incoming (you're invited)/Outgoing (you booked) — None" blocks; bookings now one "Booked dates" list (only when any) with "Invited you / You booked" tags; new header with counts, dashed empty states, full empty-state CTA, cancelled section hidden when empty.
 
 ## Not configured / backlog
 - P1: Email (EMERGENT_EMAIL_KEY) and Twilio SMS not configured.

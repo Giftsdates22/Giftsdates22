@@ -10,6 +10,7 @@ import { t } from "../lib/i18n";
 import AddressPicker, { MapsLink } from "../components/AddressPicker";
 import DateBookingList from "../components/DateBookingList";
 import CancelledDates from "../components/CancelledDates";
+import { SectionTitle, Stat, EmptyLine, EmptyDates } from "../components/DatesUI";
 import AddToCalendar from "../components/AddToCalendar";
 
 const FALLBACK = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&q=80";
@@ -310,31 +311,41 @@ export default function InviteDates() {
   const load = useCallback(async () => { try { const r = await api.get("/invites"); setData(r.data); } catch {} }, []);
   useEffect(() => { load(); const id = setInterval(load, 20000); return () => clearInterval(id); }, [load]);
 
+  const [booked, setBooked] = useState(0);
+  const total = data.incoming.length + data.outgoing.length;
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="font-serif-luxe text-3xl mb-4 flex items-center gap-2"><CalendarHeart className="text-rose-400" /> {t("dates", lang)}</h1>
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10" data-testid="dates-page">
+      <header className="mb-8 flex flex-wrap items-end justify-between gap-4 border-b border-white/10 pb-6">
+        <div>
+          <h1 className="font-serif-luxe text-4xl sm:text-5xl flex items-center gap-3"><CalendarHeart className="text-rose-400" size={30} /> {t("dates", lang)}</h1>
+          <p className="text-sm text-slate-400 mt-2">{t("dates_page_sub", lang)}</p>
+        </div>
+        <div className="flex gap-3" data-testid="dates-stats">
+          <Stat label={t("id_incoming", lang)} value={data.incoming.length} />
+          <Stat label={t("id_outgoing", lang)} value={data.outgoing.length} />
+        </div>
+      </header>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        <section data-testid="incoming-dates">
-          <h2 className="text-lg font-semibold mb-3 text-slate-200">{t("id_incoming", lang)}</h2>
-          <div className="space-y-3">
-            {data.incoming.map(d => <DateCard key={d.id} d={d} reload={load} />)}
-            {!data.incoming.length && <p className="text-sm text-slate-500">{t("id_no_incoming", lang)}</p>}
-          </div>
-        </section>
-        <section data-testid="outgoing-dates">
-          <h2 className="text-lg font-semibold mb-3 text-slate-200">{t("id_outgoing", lang)}</h2>
-          <div className="space-y-3">
-            {data.outgoing.map(d => <DateCard key={d.id} d={d} reload={load} />)}
-            {!data.outgoing.length && <p className="text-sm text-slate-500">{t("id_no_outgoing", lang)}</p>}
-          </div>
-        </section>
-      </div>
+      {total === 0 ? (booked ? null : <EmptyDates />) : (
+        <div className="grid md:grid-cols-2 gap-8">
+          <section data-testid="incoming-dates">
+            <SectionTitle label={t("id_incoming", lang)} count={data.incoming.length} />
+            <div className="space-y-3">
+              {data.incoming.map(d => <DateCard key={d.id} d={d} reload={load} />)}
+              {!data.incoming.length && <EmptyLine text={t("id_no_incoming", lang)} />}
+            </div>
+          </section>
+          <section data-testid="outgoing-dates">
+            <SectionTitle label={t("id_outgoing", lang)} count={data.outgoing.length} />
+            <div className="space-y-3">
+              {data.outgoing.map(d => <DateCard key={d.id} d={d} reload={load} />)}
+              {!data.outgoing.length && <EmptyLine text={t("id_no_outgoing", lang)} />}
+            </div>
+          </section>
+        </div>
+      )}
 
-      <div className="mt-10">
-        <DateBookingList mode="regular" />
-      </div>
-
+      <div className={total ? "mt-10" : ""}><DateBookingList mode="regular" onCount={setBooked} /></div>
       <CancelledDates />
     </div>
   );

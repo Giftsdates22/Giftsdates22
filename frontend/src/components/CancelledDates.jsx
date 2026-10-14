@@ -23,6 +23,7 @@ export default function CancelledDates() {
     return l === `ds_${s}` ? s : l;
   };
 
+  if (!loading && items.length === 0) return null;
   return (
     <div className="glass rounded-2xl p-6 mt-6 space-y-4" data-testid="profile-cancelled-dates">
       <h3 className="font-serif-luxe text-xl gold-text flex items-center gap-2">
