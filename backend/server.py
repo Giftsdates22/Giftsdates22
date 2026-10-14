@@ -2669,19 +2669,11 @@ async def book_date(req: DateBookingReq, user=Depends(get_current_user)):
         start_min = eff
     end_min = start_min + DATE_SLOT_MINUTES
     slot_from, slot_to = _min_to_hm(start_min), _min_to_hm(end_min)
-    # 3-hour slot conflict check + 15-min buffer locked before AND after each date
-    day_bookings = await db.date_bookings.find({"status": {"$in": ["escrow", "accepted", "confirmed"]},
-                                                "scheduled_at": {"$regex": f"^{day}"},
-                                                "$or": [{"to_id": req.target_id}, {"from_id": req.target_id}]}).to_list(200)
-    for b in day_bookings:
-        bs, be = _booking_start_min(b), _booking_end_min(b)
-        # existing date locks [bs - 15, be + 15]; reject any overlap with that buffered window
-        if start_min < be + DATE_BUFFER and bs - DATE_BUFFER < end_min:  # overlap incl. buffer
-            raise HTTPException(400, f"SLOT_BUSY:{_min_to_hm(bs)}-{_min_to_hm(be)}")
+    await _assert_slot_free(target, day, start_min, _pdt(req.scheduled_at))
     booking_id = str(uuid.uuid4())
     doc = {"id": booking_id, "from_id": user["id"], "to_id": req.target_id,
            "venue": req.venue, "city": req.city, "address": (req.address or "").strip(), "postal_code": (req.postal_code or "").strip(), "country": (req.country or "").strip(), "lat": req.lat, "lng": req.lng, "scheduled_at": req.scheduled_at,
-           "local_time": local_t, "slot_from": slot_from, "slot_to": slot_to,
+           "local_time": local_t, "local_day": day, "slot_from": slot_from, "slot_to": slot_to,
            "coins": req.coins, "status": "escrow", "photo_url": None,
            "activities": activities, "selected_activity": None,
            "release_at": None, "created_at": now}
@@ -2718,33 +2710,55 @@ async def respond_date(bid: str, accept: bool, selected_activity: Optional[str] 
     await notify(b["from_id"], "date_declined", "Date declined", f"{user['name']} declined your date at {b['venue']}. 🪙 {b['coins']} refunded.", {"booking_id": bid}, email=True)
     return {"status": "declined", "refunded": b["coins"]}
 
+INVITE_ACTIVE = ["INVITATION_SENT", "DATE_ACTIVITY_SELECTED", "LOCATION_PROPOSED", "TAXI_REQUESTED", "PICKUP_ADDRESS_PENDING",
+                 "PICKUP_ADDRESS_SELECTED", "DATE_CONFIRMED", "DATE_COMPLETED_PENDING_VERIFICATION", "PHOTO_VERIFICATION_PENDING"]
+INVITE_CANCELLED = ["CANCELLED", "CANCELLED_TRANSPORTATION", "REFUNDED"]
+
+def _block(day, start_min, reason, end_min=None):
+    end_min = end_min if end_min is not None else start_min + DATE_SLOT_MINUTES
+    return day, {"from": _min_to_hm(start_min), "to": _min_to_hm(end_min), "reason": reason,
+                 "lock_from": _min_to_hm(max(0, start_min - DATE_BUFFER)), "lock_to": _min_to_hm(end_min + DATE_BUFFER)}
+
+async def _taken_blocks(u):
+    """Every locked block per local day for a user: other dates (booked) and cancelled dates/slots (cancelled)."""
+    uid, out = u["id"], {}
+    def add(day, start, reason, end=None):
+        d, b = _block(day, start, reason, end); out.setdefault(d, []).append(b)
+    async for b in db.date_bookings.find({"status": {"$in": ["escrow", "accepted", "confirmed", "cancelled"]}, "$or": [{"to_id": uid}, {"from_id": uid}]},
+                                         {"_id": 0, "status": 1, "scheduled_at": 1, "slot_from": 1, "slot_to": 1, "local_time": 1, "local_day": 1}):
+        add((b.get("local_day") or b["scheduled_at"])[:10], _booking_start_min(b), "cancelled" if b["status"] == "cancelled" else "booked", _booking_end_min(b))
+    async for d in db.dates.find({"status": {"$in": INVITE_ACTIVE + INVITE_CANCELLED}, "$or": [{"inviter_id": uid}, {"recipient_id": uid}]},
+                                 {"_id": 0, "status": 1, "location": 1, "proposed_start": 1, "local_day": 1, "local_time": 1}):
+        st = _pdt((d.get("location") or {}).get("scheduled_start") or d.get("proposed_start"))
+        if not st: continue
+        day = d.get("local_day") or st.strftime("%Y-%m-%d")
+        add(day, _hm_to_min(d.get("local_time") or st.strftime("%H:%M")), "cancelled" if d["status"] in INVITE_CANCELLED else "booked")
+    for ls in (u.get("locked_slots") or []):
+        st = _pdt(ls.get("start"))
+        if st: add(ls.get("date") or st.strftime("%Y-%m-%d"), st.hour * 60 + st.minute, "cancelled")
+    # de-duplicate identical blocks (e.g. a rejected invite also stored in locked_slots)
+    return {k: [dict(t) for t in {tuple(sorted(x.items())) for x in v}] for k, v in out.items()}
+
+async def _assert_slot_free(u, day, start_min, start_dt):
+    """Reject past start times and any overlap with another date or a cancelled (locked) slot, incl. 15-min buffer."""
+    if start_dt and start_dt.tzinfo is None: start_dt = start_dt.replace(tzinfo=timezone.utc)
+    if start_dt and start_dt <= _now(): raise HTTPException(400, "TIME_PASSED")
+    end_min = start_min + DATE_SLOT_MINUTES
+    for b in (await _taken_blocks(u)).get(day, []):
+        lf, lt = _hm_to_min(b["lock_from"]), _hm_to_min(b["lock_to"])
+        if lt <= lf: lt += 24 * 60
+        if start_min < lt and lf < end_min:
+            raise HTTPException(400, f"{'SLOT_LOCKED' if b['reason'] == 'cancelled' else 'SLOT_BUSY'}:{b['from']}-{b['to']}")
+
 @api.get("/profiles/{pid}/availability")
 async def profile_availability(pid: str, user=Depends(get_current_user)):
     p = await db.users.find_one({"id": pid}, {"_id": 0, "locked_slots": 1, **AVAIL_FIELDS})
     if not p: raise HTTPException(404, "Not found")
-    busy = await db.date_bookings.find({"status": {"$in": ["escrow", "accepted", "confirmed"]}, "$or": [{"to_id": pid}, {"from_id": pid}]},
-                                       {"_id": 0, "scheduled_at": 1, "slot_from": 1, "slot_to": 1, "local_time": 1}).to_list(500)
     time_window = p.get("availability_time")
     day_slots = p.get("availability_slots") or {}
-    # busy 3-hour blocks grouped by day, expanded by the 15-min buffer (locked before & after)
-    busy_slots = {}
-    for b in busy:
-        d = b["scheduled_at"][:10]
-        bs, be = _booking_start_min(b), _booking_end_min(b)
-        busy_slots.setdefault(d, []).append({
-            "from": _min_to_hm(bs), "to": _min_to_hm(be),
-            "lock_from": _min_to_hm(max(0, bs - DATE_BUFFER)), "lock_to": _min_to_hm(be + DATE_BUFFER)})
-    # locked slots (e.g. a date the person previously rejected) — permanently unavailable
-    locked_days = {}
-    for ls in (p.get("locked_slots") or []):
-        s_dt, e_dt = _pdt(ls.get("start")), _pdt(ls.get("end"))
-        if not s_dt: continue
-        d = ls.get("date") or s_dt.strftime("%Y-%m-%d")
-        sf = s_dt.hour * 60 + s_dt.minute
-        et = (e_dt.hour * 60 + e_dt.minute) if e_dt else sf + DATE_SLOT_MINUTES
-        block = {"from": _min_to_hm(sf), "to": _min_to_hm(et), "lock_from": _min_to_hm(sf), "lock_to": _min_to_hm(et), "locked": True}
-        busy_slots.setdefault(d, []).append(block)
-        locked_days.setdefault(d, []).append(block)
+    p["id"] = pid
+    busy_slots = await _taken_blocks(p)
+    locked_days = {d: c for d, v in busy_slots.items() if (c := [x for x in v if x["reason"] == "cancelled"])}
     # per-day open ranges for the next 120 days (specific days, weekly schedule or default window)
     today = datetime.now(timezone.utc).date() - timedelta(days=1)
     day_wins = {}
@@ -4370,6 +4384,7 @@ async def _recipient_slot_or_400(rec, start_dt, local_day=None, local_time=None)
     if wins is not None and not wins: raise HTTPException(400, "DAY_UNAVAILABLE")
     if wins and fit_start(wins, _hm_to_min(local_time or start_dt.strftime("%H:%M"))) is None:
         raise HTTPException(400, f"TIME_UNAVAILABLE:{wins_label(wins)}")
+    await _assert_slot_free(rec, day, _hm_to_min(local_time or start_dt.strftime("%H:%M")), start_dt)
     block_end = start_dt + timedelta(hours=DATE_WINDOW_HOURS)
     for ls in (rec.get("locked_slots") or []):
         ls_s, ls_e = _pdt(ls.get("start")), _pdt(ls.get("end"))
@@ -4410,6 +4425,7 @@ async def create_invite(req: InviteCreateReq, user=Depends(get_current_user)):
     doc = {"id": did, "inviter_id": user["id"], "recipient_id": req.recipient_id, "options": options,
            "activity_option_1": opts_text[0], "activity_option_2": opts_text[1], "activity_option_3": opts_text[2],
            "proposed_start": proposed_start, "proposed_end": proposed_end,
+           "local_day": (req.local_day or proposed_start)[:10], "local_time": req.local_time or _pdt(proposed_start).strftime("%H:%M"),
            "chosen_idea": None, "selected_activity": None, "coins": req.coins, "total_hold": req.coins, "gift": gift,
            "location": None, "transportation": None, "status": "INVITATION_SENT",
            "status_log": [{"status": "INVITATION_SENT", "at": _iso(), "by": user["id"]}], "report": None,

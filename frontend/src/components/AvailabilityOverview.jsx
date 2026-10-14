@@ -2,7 +2,7 @@ import React from "react";
 import { CalendarClock, Moon, Repeat, Star } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
-import { toKey, fromKey, freeStarts, freeRanges, crossesMidnight, bestDayKeys } from "../lib/availability";
+import { toKey, fromKey, freeStarts, freeRanges, crossesMidnight, bestDayKeys, minStartFor } from "../lib/availability";
 
 const wdName = (i, lang) => new Date(2024, 0, 1 + i).toLocaleDateString(lang, { weekday: "short" }); // 1 Jan 2024 = Mon
 const Range = ({ w }) => (
@@ -19,7 +19,7 @@ export default function AvailabilityOverview({ avail, selected, onPick, max = 14
   const weekly = Object.entries(avail.weekly || {}).filter(([, r]) => r?.length).sort(([a], [b]) => a - b);
   const days = Object.entries(avail.day_windows || {})
     .filter(([k]) => k >= today && !busy.has(k))
-    .map(([k, w]) => { const taken = (avail.busy_slots || {})[k] || []; return { k, wins: freeRanges(w, taken), n: freeStarts(w, taken).length }; })
+    .map(([k, w]) => { const taken = (avail.busy_slots || {})[k] || []; const m = minStartFor(k); return { k, wins: freeRanges(w, taken, m), n: freeStarts(w, taken, m).length }; })
     .filter(d => d.n > 0).sort((a, b) => a.k.localeCompare(b.k)).slice(0, max);
 
   const best = new Set(bestDayKeys(avail, today));

@@ -39,7 +39,7 @@ export default function InviteDateModal({ open, onOpenChange, target, initialDay
     const k = toKey(d);
     if (d < new Date(new Date().setHours(0, 0, 0, 0))) return true;
     if (busySet.has(k)) return true;
-    return !dayWins(avail, k).length;
+    return !openDayKeys(avail).includes(k) && avail.restricted !== false;
   };
   const timeOk = day && start != null;
 
@@ -65,7 +65,9 @@ export default function InviteDateModal({ open, onOpenChange, target, initialDay
       const d = e.response?.data?.detail || "";
       toast.error(d === "ACTIVITIES_REQUIRED" ? tr("activities_required_err")
         : d === "DAY_UNAVAILABLE" ? tr("day_unavailable_err")
-        : d === "SLOT_LOCKED" ? tr("iv_slot_locked_err")
+        : d === "TIME_PASSED" ? tr("err_time_passed")
+        : d.startsWith("SLOT_LOCKED") ? tr("iv_slot_locked_err")
+        : d.startsWith("SLOT_BUSY") ? tr("iv_slot_taken_err")
         : d === "TIME_CONFLICT" ? tr("iv_slot_taken_err")
         : d.startsWith("TIME_UNAVAILABLE:") ? tr("time_unavailable_err").replace("{w}", d.split(":").slice(1).join(":"))
         : d.startsWith("MIN_COINS:") ? tr("iv_min_is", { n: d.split(":")[1] })
@@ -104,7 +106,7 @@ export default function InviteDateModal({ open, onOpenChange, target, initialDay
         <div>
           <label className="text-xs text-slate-400 flex items-center gap-1"><Clock size={12} /> {tr("pick_start_time")}{day ? ` · ${day}` : ""}</label>
           {!day ? <div className="mt-2 text-xs text-slate-500">{tr("pick_day")}…</div>
-            : <TimeChooser key={day} wins={wins} taken={taken} value={start} onChange={setStart} testid="invite-time" />}
+            : <TimeChooser key={day} day={day} wins={wins} taken={taken} value={start} onChange={setStart} testid="invite-time" />}
         </div>
 
         <div className="space-y-3" data-testid="invite-activities">

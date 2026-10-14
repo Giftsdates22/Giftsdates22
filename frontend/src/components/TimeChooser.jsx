@@ -1,19 +1,38 @@
 import React, { useEffect, useMemo } from "react";
-import { Clock, Moon } from "lucide-react";
+import { Clock, Moon, Lock } from "lucide-react";
 import ClockTimePicker from "./ClockTimePicker";
-import { freeStarts, freeRanges, quickSlots, minHm, SLOT, crossesMidnight } from "../lib/availability";
+import { freeStarts, freeRanges, quickSlots, minHm, SLOT, crossesMidnight, minStartFor } from "../lib/availability";
 import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
 
 const fmt = (m) => `${minHm(m)}${m >= 1440 ? " +1" : ""}`;
 
-export default function TimeChooser({ wins = [], taken = [], value, onChange, testid = "time-chooser" }) {
+export default function TimeChooser({ day, wins = [], taken = [], value, onChange, testid = "time-chooser" }) {
   const { lang } = useApp();
-  const starts = useMemo(() => freeStarts(wins, taken), [JSON.stringify(wins), JSON.stringify(taken)]); // eslint-disable-line
+  const minStart = minStartFor(day);
+  const starts = useMemo(() => freeStarts(wins, taken, minStart), [JSON.stringify(wins), JSON.stringify(taken), minStart]); // eslint-disable-line
   const quick = quickSlots(wins).filter(s => starts.includes(s));
   useEffect(() => { if (!starts.includes(value)) onChange(starts[0] ?? null); }, [starts]); // eslint-disable-line
 
-  if (!starts.length) return <div className="mt-2 text-xs text-slate-500" data-testid={`${testid}-no-slots`}>{t("no_slots", lang)}</div>;
+  const locked = [...taken].sort((a, b) => a.from.localeCompare(b.from));
+  const lockedList = locked.length > 0 && (
+    <div data-testid={`${testid}-locked`}>
+      <div className="text-slate-400 mb-1 flex items-center gap-1"><Lock size={11} /> {t("tc_locked", lang)}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {locked.map((b, i) => (
+          <span key={i} data-testid={`${testid}-locked-${b.from}`} className="px-2 py-0.5 rounded-md bg-white/[0.04] border border-white/10 text-slate-400 font-mono-num whitespace-nowrap">
+            <Lock size={9} className="inline me-1 -mt-0.5" />{b.from}–{b.to} · {t(b.reason === "cancelled" ? "tc_cancelled" : "tc_other_date", lang)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+  const pastNote = minStart >= 0 && <p className="text-[11px] text-amber-300/80" data-testid={`${testid}-past-note`}>{t("tc_past_note", lang)}</p>;
+  if (!starts.length) return (
+    <div className="mt-2 space-y-2 text-xs">
+      <div className="text-slate-500" data-testid={`${testid}-no-slots`}>{t("no_slots", lang)}</div>{lockedList}{pastNote}
+    </div>
+  );
   return (
     <div className="mt-2 grid sm:grid-cols-[auto_1fr] gap-4 items-start" data-testid={testid}>
       <ClockTimePicker starts={starts} value={value} onChange={onChange} />
@@ -25,9 +44,10 @@ export default function TimeChooser({ wins = [], taken = [], value, onChange, te
         <div>
           <div className="text-slate-400 mb-1 flex items-center gap-1"><Clock size={11} /> {t("av_open_hours", lang)}</div>
           <div className="flex flex-wrap gap-1.5">
-            {freeRanges(wins, taken).map((w, i) => <span key={i} className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 font-mono-num">{w.from}–{w.to}{crossesMidnight(w) && <Moon size={10} className="inline ml-1" />}</span>)}
+            {freeRanges(wins, taken, minStart).map((w, i) => <span key={i} className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 font-mono-num">{w.from}–{w.to}{crossesMidnight(w) && <Moon size={10} className="inline ml-1" />}</span>)}
           </div>
         </div>
+        {lockedList}
         {quick.length > 0 && (
           <div>
             <div className="text-slate-400 mb-1">{t("quick_slots", lang)}</div>
@@ -41,6 +61,7 @@ export default function TimeChooser({ wins = [], taken = [], value, onChange, te
             </div>
           </div>
         )}
+        {pastNote}
         <p className="text-[11px] text-slate-500">{t("any_time_note", lang)}</p>
       </div>
     </div>

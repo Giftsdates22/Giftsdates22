@@ -38,7 +38,7 @@ export default function DateBookingModal({ open, onOpenChange, target }) {
     const k = toKey(d);
     if (d < new Date(new Date().setHours(0, 0, 0, 0))) return true;
     if (busySet.has(k)) return true;
-    return !dayWins(avail, k).length;
+    return !openDayKeys(avail).includes(k) && avail.restricted !== false;
   };
 
   const submit = async () => {
@@ -59,6 +59,8 @@ export default function DateBookingModal({ open, onOpenChange, target }) {
         d === "DAY_UNAVAILABLE" ? t("day_unavailable_err", lang)
         : d === "ACTIVITIES_REQUIRED" ? t("activities_required_err", lang)
         : d === "DAY_BUSY" ? t("day_busy_err", lang)
+        : d === "TIME_PASSED" ? t("err_time_passed", lang)
+        : d.startsWith("SLOT_LOCKED:") ? t("iv_slot_locked_err", lang)
         : d.startsWith("SLOT_BUSY:") ? t("slot_busy_err", lang).replace("{w}", d.split(":").slice(1).join(":"))
         : d.startsWith("TIME_UNAVAILABLE:") ? t("time_unavailable_err", lang).replace("{w}", d.split(":").slice(1).join(":"))
         : d || t("failed", lang));
@@ -89,7 +91,7 @@ export default function DateBookingModal({ open, onOpenChange, target }) {
               <Label className="text-xs text-slate-400">{t("pick_start_time", lang)}{day ? ` · ${day}` : ""}</Label>
               <p className="text-[11px] text-amber-300/80 mt-0.5" data-testid="date-buffer-note">🔒 {t("buffer_note", lang)}</p>
               {!day ? <div className="mt-2 text-xs text-slate-500">{t("pick_day", lang)}…</div>
-                : <TimeChooser key={day} wins={wins} taken={taken} value={start} onChange={setStart} testid="date-time" />}
+                : <TimeChooser key={day} day={day} wins={wins} taken={taken} value={start} onChange={setStart} testid="date-time" />}
             </div>
           </div>
           <div className="space-y-3">
