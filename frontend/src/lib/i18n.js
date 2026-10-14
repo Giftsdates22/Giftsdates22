@@ -163,6 +163,8 @@ const T = {
   ao_next_open: { en: "Next open days" },
   ao_starts: { en: "{n} start times" },
   ao_open_any: { en: "Open any day, any time." },
+  ao_best: { en: "Best day" },
+  ao_best_hint: { en: "Best days have the most free start times" },
   sw_btn: { en: "Send taxi money instead" },
   sw_hint: { en: "Changed your mind about the pickup? Send the taxi fee your date requested (🪙{n}) instead — the date stays confirmed and the pickup is cancelled." },
   sw_confirm: { en: "Cancel the pickup and send 🪙{n} for a taxi instead? The coins are added to this date's escrow." },

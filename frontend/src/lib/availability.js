@@ -54,3 +54,12 @@ export const freeRanges = (wins = [], taken = []) => {
 // Days (keys) that still have at least one free start time.
 export const openDayKeys = (avail) =>
   Object.entries(avail?.day_windows || {}).filter(([k, w]) => freeStarts(w, (avail.busy_slots || {})[k] || []).length).map(([k]) => k);
+
+// Up to 3 upcoming days with the most free start times (none if every day is equal).
+export const bestDayKeys = (avail, fromKeyStr = toKey(new Date())) => {
+  const busy = new Set(avail?.busy_days || []);
+  const days = Object.entries(avail?.day_windows || {}).filter(([k]) => k >= fromKeyStr && !busy.has(k))
+    .map(([k, w]) => ({ k, n: freeStarts(w, (avail.busy_slots || {})[k] || []).length })).filter(d => d.n > 0);
+  if (new Set(days.map(d => d.n)).size < 2) return [];
+  return days.sort((a, b) => b.n - a.n || a.k.localeCompare(b.k)).slice(0, 3).map(d => d.k);
+};
