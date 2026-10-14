@@ -2775,6 +2775,14 @@ async def unlock_slot(req: UnlockSlotReq, user=Depends(get_current_user)):
     await db.users.update_one({"id": user["id"]}, {"$addToSet": {"unlocked_slots": f"{day}|{tm}"}})
     return {"ok": True}
 
+@api.post("/me/locked-slots/unlock-all")
+async def unlock_all_slots(user=Depends(get_current_user)):
+    if not has_premium(user): raise HTTPException(403, "PREMIUM_REQUIRED")
+    today = _now().strftime("%Y-%m-%d")
+    keys = [f"{d}|{b['from']}" for d, v in (await _taken_blocks(user)).items() if d >= today for b in v if b["reason"] == "cancelled"]
+    if keys: await db.users.update_one({"id": user["id"]}, {"$addToSet": {"unlocked_slots": {"$each": keys}}})
+    return {"ok": True, "count": len(keys)}
+
 @api.get("/profiles/{pid}/availability")
 async def profile_availability(pid: str, user=Depends(get_current_user)):
     p = await db.users.find_one({"id": pid}, {"_id": 0, "locked_slots": 1, "unlocked_slots": 1, **AVAIL_FIELDS})
