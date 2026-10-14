@@ -4572,24 +4572,21 @@ async def invite_pickup_confirm(did: str, user=Depends(get_current_user)):
         await notify(uid, "date_accepted", "Your date is confirmed", "Pickup confirmed — your date is confirmed.", {"date_id": did}, email=True, link=DATES_LINK, cta="View Date")
     return {"ok": True, "status": "DATE_CONFIRMED"}
 
-class SwitchTaxiReq(BaseModel):
-    amount: Optional[int] = None
-
 @api.post("/invites/{did}/pickup/switch-to-taxi")
-async def invite_pickup_switch_to_taxi(did: str, req: SwitchTaxiReq, user=Depends(get_current_user)):
+async def invite_pickup_switch_to_taxi(did: str, user=Depends(get_current_user)):
     """Inviter changes their mind after a confirmed pickup and sends taxi money instead."""
     d = await _get_party(did, user["id"], "inviter")
     tr = d.get("transportation") or {}
     if d["status"] != "DATE_CONFIRMED" or tr.get("type") != "pickup": raise HTTPException(400, "Only a confirmed pickup can be switched to a taxi")
     start = _pdt((d.get("location") or {}).get("scheduled_start"))
     if start and _now() >= start - timedelta(minutes=30): raise HTTPException(400, "LOCKED")
-    amount = int(req.amount or tr.get("taxi_amount") or 0)
-    if amount <= 0: raise HTTPException(400, "Invalid amount")
+    amount = int(tr.get("taxi_amount") or 0)
+    if amount <= 0: raise HTTPException(400, "No taxi fee was requested for this date")
     if ((user.get("coins") or 0) + (user.get("withdrawable") or 0)) < amount: raise HTTPException(400, "Insufficient coins")
     await spend_coins(user["id"], amount)
     await record_txn(user["id"], "DATE_PAYMENT", -amount, did, "Taxi fee escrow (switched from pickup)")
     await db.dates.update_one({"id": did}, {"$inc": {"total_hold": amount}, "$set": {
-        "transportation.type": "taxi", "transportation.status": "confirmed", "transportation.taxi_amount": amount,
+        "transportation.type": "taxi", "transportation.status": "confirmed",
         "transportation.switched_from_pickup": True, "transportation.switched_at": _iso()},
         "$unset": {k: "" for k in ("transportation.pickup_address", "transportation.pickup_lat", "transportation.pickup_lng",
                                     "transportation.pickup_city", "transportation.pickup_country", "transportation.pickup_postal_code")}})
