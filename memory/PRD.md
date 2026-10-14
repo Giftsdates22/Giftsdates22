@@ -14,6 +14,8 @@ React (CRA/craco) + FastAPI (server.py, ~4.9k lines) + MongoDB. JWT email/passwo
 - Admin account created: giftsdates@gmail.com (see memory/test_credentials.md).
 - Smoke test passed 100% backend + frontend.
 
+- Stripe: Emergent claimable sandbox provisioned (acct_1UPpFf2ejuym8P5a, CA, test mode) and keys added to backend/.env. Coins, custom amounts, Premium/Lite (one-time, Stripe-managed tax) and VIP (subscription) checkout tested end-to-end (iteration_2: 100%).
+
 ## Not configured / backlog
 - P1: Email (EMERGENT_EMAIL_KEY) and Twilio SMS not configured.
 - P1: Original user accounts/data not in repo (they live in the old database).
