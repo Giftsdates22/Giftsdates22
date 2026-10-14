@@ -20,6 +20,7 @@ const FALLBACKS = ["https://images.unsplash.com/photo-1581841064838-a470c740e8ee
 import VideoCallModal from "../components/VideoCallModal";
 import DateBookingModal from "../components/DateBookingModal";
 import InviteDateModal from "../components/InviteDateModal";
+import AvailabilityOverview from "../components/AvailabilityOverview";
 
 const FALLBACK_WOMAN = "https://images.unsplash.com/photo-1581841064838-a470c740e8ee?crop=entropy&cs=srgb&fm=jpg&q=85&w=900";
 const FALLBACK_MAN = "https://images.unsplash.com/photo-1545996124-0501ebae84d0?crop=entropy&cs=srgb&fm=jpg&q=85&w=900";
@@ -45,9 +46,12 @@ export default function ProfileView() {
   const [p, setP] = useState(null);
   const [idx, setIdx] = useState(0);
   const [modal, setModal] = useState(null);
+  const [avail, setAvail] = useState(null);
+  const [inviteDay, setInviteDay] = useState(null);
 
   const load = () => api.get(`/profiles/${id}`).then(r => setP(r.data)).catch(() => { toast.error(t("failed_load", lang)); nav("/browse"); });
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (user && !previewGuest) api.get(`/profiles/${id}/availability`).then(r => setAvail(r.data)).catch(() => setAvail(null)); }, [id, user?.id]); // eslint-disable-line
 
   const like = async () => {
     try {
@@ -148,6 +152,13 @@ export default function ProfileView() {
             )}
 
             {p.bio && <div className="glass rounded-2xl p-5"><h3 className="font-serif-luxe text-xl mb-2">{t("about_me", lang)}</h3><p className="text-sm text-slate-300 whitespace-pre-line" data-testid="profile-view-bio">{p.bio}</p></div>}
+            {avail && user?.id !== p.id && (
+              <div className="glass rounded-2xl p-5" data-testid="profile-availability">
+                <h3 className="font-serif-luxe text-xl mb-1 flex items-center gap-2">{t("ao_heading", lang)}</h3>
+                <p className="text-xs text-slate-400 mb-3">{t("ao_heading_sub", lang)}</p>
+                <AvailabilityOverview avail={avail} onPick={(k) => { setInviteDay(k); setModal("date"); }} testid="profile-avail" />
+              </div>
+            )}
 
             {p.gifts_count > 0 && (
               <div className="glass rounded-2xl p-5" data-testid="profile-view-top-givers">
@@ -207,7 +218,7 @@ export default function ProfileView() {
       </div>
       <GiftModal open={modal === "gift"} onOpenChange={(v) => !v && setModal(null)} target={p} />
       <VideoCallModal open={modal === "video"} onOpenChange={(v) => !v && setModal(null)} target={p} />
-      <InviteDateModal open={modal === "date"} onOpenChange={(v) => !v && setModal(null)} target={p} />
+      <InviteDateModal open={modal === "date"} onOpenChange={(v) => { if (!v) { setModal(null); setInviteDay(null); } }} target={p} initialDay={inviteDay} />
       <ReportModal open={modal === "report"} onOpenChange={(v) => !v && setModal(null)} target={p} />
       <GiftPremiumModal open={modal === "giftpremium"} onOpenChange={(v) => !v && setModal(null)} target={p} />
       <div className="max-w-5xl mx-auto px-4"><ProfileScheduleCard profile={p} /></div>

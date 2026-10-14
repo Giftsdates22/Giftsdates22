@@ -10,8 +10,9 @@ import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
 import { toKey, fromKey, minHm, dayWins } from "../lib/availability";
 import TimeChooser from "./TimeChooser";
+import AvailabilityOverview from "./AvailabilityOverview";
 
-export default function InviteDateModal({ open, onOpenChange, target }) {
+export default function InviteDateModal({ open, onOpenChange, target, initialDay = null }) {
   const { user, lang, refreshUser } = useApp();
   const tr = (k, vars) => { let s = t(k, lang); if (vars) Object.entries(vars).forEach(([n, v]) => (s = s.replace(`{${n}}`, v))); return s; };
   const floor = Math.max(150, target?.date_price || 0);
@@ -25,7 +26,7 @@ export default function InviteDateModal({ open, onOpenChange, target }) {
 
   useEffect(() => {
     if (open) {
-      setActivities(["", "", ""]); setCoins(floor); setAck(false); setDay(null); setStart(null);
+      setActivities(["", "", ""]); setCoins(floor); setAck(false); setDay(initialDay); setStart(null);
       if (target?.id) api.get(`/profiles/${target.id}/availability`).then(r => setAvail(r.data)).catch(() => {});
     }
   }, [open]); // eslint-disable-line
@@ -87,11 +88,14 @@ export default function InviteDateModal({ open, onOpenChange, target }) {
           <span>{tr("iv_safety")}</span>
         </div>
 
-        {/* Pick any open day, then any start time on the clock */}
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.03] p-3" data-testid="invite-availability">
+          <div className="text-sm text-slate-200 mb-2 font-semibold">{t("ao_title", lang).replace("{name}", target?.name || "")}</div>
+          <AvailabilityOverview avail={avail} selected={day} onPick={setDay} max={8} testid="invite-avail" />
+        </div>
         <div>
           <label className="block text-xs text-slate-400">{tr("pick_day")}</label>
           <div className="mt-1 rounded-xl border border-white/10 bg-white/5 inline-block" data-testid="invite-calendar">
-            <Calendar mode="single" selected={day ? fromKey(day) : undefined} onSelect={(d) => d && setDay(toKey(d))} disabled={isDisabled}
+            <Calendar key={day ? day.slice(0, 7) : "now"} defaultMonth={day ? fromKey(day) : undefined} mode="single" selected={day ? fromKey(day) : undefined} onSelect={(d) => d && setDay(toKey(d))} disabled={isDisabled}
               modifiers={{ available: Object.keys(avail.day_windows || {}).map(fromKey) }}
               modifiersClassNames={{ available: "ring-1 ring-emerald-400/50 rounded-md" }}
               classNames={{ day_selected: "bg-rose-500 text-white hover:bg-rose-500 focus:bg-rose-500" }} />

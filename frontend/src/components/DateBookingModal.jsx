@@ -10,6 +10,7 @@ import { useApp } from "../context/AppContext";
 import { t } from "../lib/i18n";
 import { toKey, fromKey, minHm, dayWins } from "../lib/availability";
 import TimeChooser from "./TimeChooser";
+import AvailabilityOverview from "./AvailabilityOverview";
 import AddressPicker from "./AddressPicker";
 
 export default function DateBookingModal({ open, onOpenChange, target }) {
@@ -68,11 +69,15 @@ export default function DateBookingModal({ open, onOpenChange, target }) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-[#161320] border-white/10 text-white max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle className="font-serif-luxe text-2xl">{t("book_date", lang)} · {target?.name}</DialogTitle></DialogHeader>
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.03] p-3" data-testid="date-availability">
+          <div className="text-sm text-slate-200 mb-2 font-semibold">{t("ao_title", lang).replace("{name}", target?.name || "")}</div>
+          <AvailabilityOverview avail={avail} selected={day} onPick={setDay} max={8} testid="date-avail" />
+        </div>
         <div className="grid sm:grid-cols-[auto_1fr] gap-5">
           <div>
             <Label className="text-xs text-slate-400">{t("pick_day", lang)}</Label>
             <div className="mt-1 rounded-xl border border-white/10 bg-white/5" data-testid="date-calendar">
-              <Calendar mode="single" selected={day ? fromKey(day) : undefined} onSelect={(d) => d && setDay(toKey(d))} disabled={isDisabled}
+              <Calendar key={day ? day.slice(0, 7) : "now"} defaultMonth={day ? fromKey(day) : undefined} mode="single" selected={day ? fromKey(day) : undefined} onSelect={(d) => d && setDay(toKey(d))} disabled={isDisabled}
                 modifiers={{ busy: avail.busy_days.map(fromKey), available: Object.keys(avail.day_windows || {}).map(fromKey) }}
                 modifiersClassNames={{ busy: "line-through text-rose-400/70", available: "ring-1 ring-emerald-400/50 rounded-md" }}
                 classNames={{ day_selected: "bg-rose-500 text-white hover:bg-rose-500 focus:bg-rose-500" }} />
