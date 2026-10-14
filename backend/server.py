@@ -2783,6 +2783,48 @@ async def unlock_all_slots(user=Depends(get_current_user)):
     if keys: await db.users.update_one({"id": user["id"]}, {"$addToSet": {"unlocked_slots": {"$each": keys}}})
     return {"ok": True, "count": len(keys)}
 
+class LiveLocReq(BaseModel):
+    lat: float
+    lng: float
+    sharing: bool = True
+
+async def _live_target(kind, did, uid):
+    if kind == "invite":
+        d = await db.dates.find_one({"id": did}, {"_id": 0, "inviter_id": 1, "recipient_id": 1, "status": 1, "location": 1, "live_location": 1})
+        if not d: raise HTTPException(404, "Not found")
+        parties, start, ok = (d["inviter_id"], d["recipient_id"]), _pdt((d.get("location") or {}).get("scheduled_start")), d["status"] == "DATE_CONFIRMED"
+        coll = db.dates
+    elif kind == "booking":
+        d = await db.date_bookings.find_one({"id": did}, {"_id": 0, "from_id": 1, "to_id": 1, "status": 1, "scheduled_at": 1, "live_location": 1})
+        if not d: raise HTTPException(404, "Not found")
+        parties, start, ok = (d["from_id"], d["to_id"]), _pdt(d.get("scheduled_at")), d["status"] in ("accepted", "confirmed")
+        coll = db.date_bookings
+    else: raise HTTPException(404, "Not found")
+    if uid not in parties: raise HTTPException(403, "Forbidden")
+    if start and start.tzinfo is None: start = start.replace(tzinfo=timezone.utc)
+    return coll, d, parties, start, ok
+
+@api.post("/live-location/{kind}/{did}")
+async def share_live_location(kind: str, did: str, req: LiveLocReq, user=Depends(get_current_user)):
+    """Optional: share your current position with your date from 2h before the start until the date ends."""
+    coll, d, _, start, ok = await _live_target(kind, did, user["id"])
+    if not req.sharing:
+        await coll.update_one({"id": did}, {"$unset": {f"live_location.{user['id']}": ""}})
+        return {"ok": True, "sharing": False}
+    if not ok or not start or not (start - timedelta(hours=2) <= _now() <= start + timedelta(minutes=DATE_SLOT_MINUTES)):
+        raise HTTPException(400, "LIVE_LOCATION_CLOSED")
+    if not (-90 <= req.lat <= 90 and -180 <= req.lng <= 180): raise HTTPException(400, "Invalid coordinates")
+    await coll.update_one({"id": did}, {"$set": {f"live_location.{user['id']}": {"lat": req.lat, "lng": req.lng, "at": _iso()}}})
+    return {"ok": True, "sharing": True}
+
+@api.get("/live-location/{kind}/{did}")
+async def get_live_location(kind: str, did: str, user=Depends(get_current_user)):
+    _, d, parties, start, ok = await _live_target(kind, did, user["id"])
+    other = parties[1] if parties[0] == user["id"] else parties[0]
+    live = d.get("live_location") or {}
+    open_ = bool(ok and start and start - timedelta(hours=2) <= _now() <= start + timedelta(minutes=DATE_SLOT_MINUTES))
+    return {"open": open_, "opens_at": _iso(start - timedelta(hours=2)) if start else None, "me": live.get(user["id"]), "other": live.get(other) if open_ else None}
+
 @api.get("/profiles/{pid}/availability")
 async def profile_availability(pid: str, user=Depends(get_current_user)):
     p = await db.users.find_one({"id": pid}, {"_id": 0, "locked_slots": 1, "unlocked_slots": 1, **AVAIL_FIELDS})
@@ -4914,6 +4956,8 @@ async def _run_lifecycle():
         elif start - timedelta(hours=1) <= now < start: await snd("h1", "Your date starts in 1 hour", f"Your date starts in about 1 hour ({when}). Cancellation and date coin actions lock 30 minutes before the start.")
         elif start <= now < start + timedelta(hours=3): await snd("started", "Your date has started", "Enjoy — be respectful and safe.", email=False)
         elif now >= start + timedelta(hours=3): await snd("h3", "Your scheduled date window has ended", "Photo confirmation unlocks 24h after the start.", email=False)
+        if start - timedelta(minutes=15) <= now < start: await snd("m15", "Your date starts in 15 minutes", f"Get ready — your date starts in 15 minutes ({when}). Share your live location if you want help finding each other.", email=False)
+        if start + timedelta(minutes=DATE_SLOT_MINUTES - 15) <= now < start + timedelta(minutes=DATE_SLOT_MINUTES): await snd("end15", "Your date ends in 15 minutes", "Your date is about to finish — 15 minutes left.", email=False)
         if now > start + timedelta(hours=72) and not d.get("report") and not (d.get("verification") or {}).get("status") == "pending" and not d.get("paid_out"):
             await _complete(d, "COMPLETED_AUTO")
 
@@ -4922,24 +4966,26 @@ def _reminder_when(start, loc):
     return f"{start.strftime('%a %d %b %Y, %H:%M')} UTC" + (f" at {place}" if place else "")
 
 async def _run_booking_reminders():
-    """24h and 1h reminders (in-app + email) to both people for accepted/confirmed bookings."""
+    """24h/1h (in-app + email) and 15-min start/end (in-app) reminders for accepted/confirmed bookings."""
     now = _now()
     docs = await db.date_bookings.find({"status": {"$in": ["accepted", "confirmed"]}}, {"_id": 0}).to_list(1000)
     for b in docs:
         start = _pdt(b.get("scheduled_at"))
         if not start: continue
         if start.tzinfo is None: start = start.replace(tzinfo=timezone.utc)
-        if now >= start: continue
-        if start - timedelta(hours=1) <= now: flag, title = "h1", "Your date starts in 1 hour"
-        elif start - timedelta(hours=24) <= now: flag, title = "h24", "Your date is tomorrow"
-        else: continue
-        res = await db.date_bookings.update_one({"id": b["id"], f"reminders.{flag}": {"$ne": True}}, {"$set": {f"reminders.{flag}": True}})
-        if not res.modified_count: continue
         when = _reminder_when(start, b)
         idea = f" Plan: {b['selected_activity']}." if b.get("selected_activity") else ""
-        for uid in (b["from_id"], b["to_id"]):
-            await notify(uid, "date_reminder", title, f"Reminder: your date is on {when}.{idea}", {"booking_id": b["id"]},
-                         email=True, link=DATES_LINK, cta="View Date", sms=False)
+        end = start + timedelta(minutes=DATE_SLOT_MINUTES)
+        due = []
+        if start - timedelta(hours=24) <= now < start - timedelta(hours=1): due.append(("h24", "Your date is tomorrow", f"Reminder: your date is on {when}.{idea}", True))
+        if start - timedelta(hours=1) <= now < start: due.append(("h1", "Your date starts in 1 hour", f"Reminder: your date is on {when}.{idea}", True))
+        if start - timedelta(minutes=15) <= now < start: due.append(("m15", "Your date starts in 15 minutes", f"Get ready — your date starts in 15 minutes ({when}). Share your live location if you want help finding each other.", False))
+        if end - timedelta(minutes=15) <= now < end: due.append(("end15", "Your date ends in 15 minutes", "Your date is about to finish — 15 minutes left.", False))
+        for flag, title, body, email in due:
+            res = await db.date_bookings.update_one({"id": b["id"], f"reminders.{flag}": {"$ne": True}}, {"$set": {f"reminders.{flag}": True}})
+            if not res.modified_count: continue
+            for uid in (b["from_id"], b["to_id"]):
+                await notify(uid, "date_reminder", title, body, {"booking_id": b["id"]}, email=email, link=DATES_LINK, cta="View Date", sms=False)
 
 async def _date_lifecycle_loop():
     """Internal background loop: fires date reminders to both parties for confirmed

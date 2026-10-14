@@ -11,6 +11,7 @@ import AddressPicker from "./AddressPicker";
 import AddToCalendar from "./AddToCalendar";
 import { SectionTitle, EmptyLine } from "./DatesUI";
 import CountdownBadge from "./CountdownBadge";
+import LiveLocation from "./LiveLocation";
 import { matchesFilter } from "../lib/dateFilters";
 
 const STATUS_MAP = { escrow: "status_escrow", accepted: "status_accepted", confirmed: "status_confirmed", released: "status_released", cancelled: "status_cancelled", declined: "status_declined" };
@@ -148,6 +149,8 @@ export default function DateBookingList({ mode = "regular", onItems, filter = "a
           <div className="mt-2"><AddToCalendar id={b.id} title={`GiftsDates: ${b.selected_activity || "Date"} · ${b.venue}`}
             place={[b.venue, b.address, b.city, b.country].filter(Boolean).join(", ")} start={new Date(b.scheduled_at)} /></div>
         )}
+        {["accepted", "confirmed"].includes(b.status) && <div className="mt-2"><LiveLocation kind="booking" id={b.id} otherName={isIncoming ? b.from_name : b.to_name}
+          venue={b.lat != null && b.lng != null ? `${b.lat},${b.lng}` : [b.venue, b.address, b.city, b.country].filter(Boolean).join(", ")} /></div>}
         {(() => {
           const taxi = b.taxi;
           const active = ["escrow", "accepted", "confirmed"].includes(b.status);

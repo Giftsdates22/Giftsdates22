@@ -12,6 +12,7 @@ import DateBookingList from "../components/DateBookingList";
 import CancelledDates from "../components/CancelledDates";
 import { SectionTitle, Stat, EmptyLine, EmptyDates, FilterBar } from "../components/DatesUI";
 import CountdownBadge from "../components/CountdownBadge";
+import LiveLocation from "../components/LiveLocation";
 import { matchesFilter, countByFilter } from "../lib/dateFilters";
 import AddToCalendar from "../components/AddToCalendar";
 
@@ -199,7 +200,7 @@ function DateCard({ d, reload }) {
             <h4 className="font-serif-luxe text-lg truncate">{d.other?.name}{d.other?.age ? `, ${d.other.age}` : ""}</h4>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-slate-300 uppercase tracking-wide" data-testid={`date-status-${d.id}`}>{statusLabel()}</span>
           </div>
-          {d.status === "DATE_CONFIRMED" && d.location?.scheduled_start && <div className="mt-1.5"><CountdownBadge to={d.location.scheduled_start} testid={`date-countdown-${d.id}`} /></div>}
+          {["DATE_CONFIRMED", "DATE_COMPLETED_PENDING_VERIFICATION"].includes(d.status) && d.location?.scheduled_start && <div className="mt-1.5"><CountdownBadge to={d.location.scheduled_start} testid={`date-countdown-${d.id}`} /></div>}
           <p className="text-xs text-slate-400 mt-0.5" data-testid={`date-next-${d.id}`}>➜ {stepText()}</p>
           {d.chosen_idea && <div className="text-sm text-rose-200 mt-1"><CalendarHeart size={13} className="inline me-1" />{d.chosen_idea.name}</div>}
           {!d.chosen_idea && d.options && <div className="text-xs text-slate-300 mt-1">{tr("id_options")}: {d.options.map(o => o.name).join(" · ")}</div>}
@@ -317,6 +318,8 @@ function DateCard({ d, reload }) {
         {chatEnabled && <Button data-testid={`date-chat-toggle-${d.id}`} onClick={() => setShowChat(v => !v)} variant="outline" className="h-9 bg-sky-500/10 border-sky-500/40 text-sky-300"><MessageCircle size={14} className="me-1" />{tr("id_chat")}</Button>}
         {showCal && (() => { const ev = _calEvent(); return <AddToCalendar id={d.id} title={ev.title} place={ev.place} start={ev.s} end={ev.e} />; })()}
       </div>
+      {d.status === "DATE_CONFIRMED" && <div className="mt-3"><LiveLocation kind="invite" id={d.id} otherName={d.other?.name}
+        venue={d.location?.lat != null && d.location?.lng != null ? `${d.location.lat},${d.location.lng}` : [d.location?.venue, d.location?.address, d.location?.city, d.location?.country].filter(Boolean).join(", ")} /></div>}
 
       {showReport && (
         <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/5 p-3 space-y-2" data-testid={`report-form-${d.id}`}>
