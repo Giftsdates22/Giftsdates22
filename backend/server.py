@@ -4831,20 +4831,42 @@ async def _run_lifecycle():
     for d in docs:
         start = _pdt((d.get("location") or {}).get("scheduled_start"))
         if not start: continue
-        r = d.get("reminders") or {}
-        async def snd(flag, title, body):
-            if r.get(flag): return
+        when = _reminder_when(start, d.get("location") or {})
+        async def snd(flag, title, body, email=True):
+            res = await db.dates.update_one({"id": d["id"], f"reminders.{flag}": {"$ne": True}}, {"$set": {f"reminders.{flag}": True}})
+            if not res.modified_count: return
             for uid in (d["inviter_id"], d["recipient_id"]):
-                await notify(uid, "date_reminder", title, body, {"date_id": d["id"]}, email=True, link=DATES_LINK, cta="View Date")
-            await db.dates.update_one({"id": d["id"]}, {"$set": {f"reminders.{flag}": True}})
-        if start - timedelta(hours=24) <= now < start - timedelta(hours=3): await snd("h24", "Your date is tomorrow", "Reminder: your date is coming up. Check the details and use the date chat to coordinate.")
-        elif start - timedelta(hours=3) <= now < start - timedelta(hours=1): await snd("pre3h", "Your date is in a few hours", "Heads up — your date starts in about 3 hours. Confirm the meeting spot in the date chat so no one forgets.")
-        elif start - timedelta(hours=1) <= now < start - timedelta(minutes=30): await snd("h1", "Your date starts in 1 hour", "Your date starts in 1 hour.")
-        elif start - timedelta(minutes=30) <= now < start: await snd("m30", "Your date starts in 30 minutes", "Cancellation and date coin actions are now locked.")
-        elif start <= now < start + timedelta(hours=3): await snd("started", "Your date has started", "Enjoy — be respectful and safe.")
-        elif now >= start + timedelta(hours=3): await snd("h3", "Your scheduled date window has ended", "Photo confirmation unlocks 24h after the start.")
+                await notify(uid, "date_reminder", title, body, {"date_id": d["id"]}, email=email, link=DATES_LINK, cta="View Date", sms=False)
+        if start - timedelta(hours=24) <= now < start - timedelta(hours=1): await snd("h24", "Your date is tomorrow", f"Reminder: your date is on {when}. Check the details and use the date chat to coordinate.")
+        elif start - timedelta(hours=1) <= now < start: await snd("h1", "Your date starts in 1 hour", f"Your date starts in about 1 hour ({when}). Cancellation and date coin actions lock 30 minutes before the start.")
+        elif start <= now < start + timedelta(hours=3): await snd("started", "Your date has started", "Enjoy — be respectful and safe.", email=False)
+        elif now >= start + timedelta(hours=3): await snd("h3", "Your scheduled date window has ended", "Photo confirmation unlocks 24h after the start.", email=False)
         if now > start + timedelta(hours=72) and not d.get("report") and not (d.get("verification") or {}).get("status") == "pending" and not d.get("paid_out"):
             await _complete(d, "COMPLETED_AUTO")
+
+def _reminder_when(start, loc):
+    place = ", ".join(x for x in (loc.get("venue"), loc.get("city")) if x)
+    return f"{start.strftime('%a %d %b %Y, %H:%M')} UTC" + (f" at {place}" if place else "")
+
+async def _run_booking_reminders():
+    """24h and 1h reminders (in-app + email) to both people for accepted/confirmed bookings."""
+    now = _now()
+    docs = await db.date_bookings.find({"status": {"$in": ["accepted", "confirmed"]}}, {"_id": 0}).to_list(1000)
+    for b in docs:
+        start = _pdt(b.get("scheduled_at"))
+        if not start: continue
+        if start.tzinfo is None: start = start.replace(tzinfo=timezone.utc)
+        if now >= start: continue
+        if start - timedelta(hours=1) <= now: flag, title = "h1", "Your date starts in 1 hour"
+        elif start - timedelta(hours=24) <= now: flag, title = "h24", "Your date is tomorrow"
+        else: continue
+        res = await db.date_bookings.update_one({"id": b["id"], f"reminders.{flag}": {"$ne": True}}, {"$set": {f"reminders.{flag}": True}})
+        if not res.modified_count: continue
+        when = _reminder_when(start, b)
+        idea = f" Plan: {b['selected_activity']}." if b.get("selected_activity") else ""
+        for uid in (b["from_id"], b["to_id"]):
+            await notify(uid, "date_reminder", title, f"Reminder: your date is on {when}.{idea}", {"booking_id": b["id"]},
+                         email=True, link=DATES_LINK, cta="View Date", sms=False)
 
 async def _date_lifecycle_loop():
     """Internal background loop: fires date reminders to both parties for confirmed
@@ -4854,6 +4876,7 @@ async def _date_lifecycle_loop():
     while True:
         try:
             await _run_lifecycle()
+            await _run_booking_reminders()
         except Exception as ex:
             logging.error(f"date-lifecycle loop error: {ex}")
         await asyncio.sleep(60)
@@ -4900,6 +4923,7 @@ async def cron_tick(authorization: Optional[str] = Header(None)):
     import asyncio
     _cron_auth(authorization)
     asyncio.create_task(_run_lifecycle())
+    asyncio.create_task(_run_booking_reminders())
     return {"accepted": True}
 
 @api.post("/cron/spin")
