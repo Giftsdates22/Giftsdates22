@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Lock, LockOpen, Crown } from "lucide-react";
+import { Lock, LockOpen, Crown, ChevronDown } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "./ui/button";
@@ -12,6 +12,7 @@ export default function LockedSlots() {
   const { lang } = useApp();
   const [data, setData] = useState({ items: [], can_unlock: false });
   const [busy, setBusy] = useState(null);
+  const [open, setOpen] = useState(false);
   const load = () => api.get("/me/locked-slots").then(r => setData(r.data)).catch(() => {});
   useEffect(() => { load(); }, []);
 
@@ -25,9 +26,16 @@ export default function LockedSlots() {
 
   if (!data.items.length) return null;
   return (
-    <div className="glass rounded-2xl p-5" data-testid="locked-slots">
-      <h3 className="font-serif-luxe text-xl flex items-center gap-2"><Lock size={18} className="text-slate-300" />{t("ls_title", lang)}</h3>
-      <p className="text-xs text-slate-400 mt-1 mb-3">{t("ls_sub", lang)}</p>
+    <div className="glass rounded-2xl" data-testid="locked-slots">
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} data-testid="locked-slots-toggle"
+        className="w-full flex items-center gap-2 p-5 text-left">
+        <Lock size={18} className="text-slate-300" />
+        <span className="font-serif-luxe text-xl">{t("ls_title", lang)}</span>
+        <span className="text-[11px] font-mono-num px-2 py-0.5 rounded-full bg-white/10 text-slate-300" data-testid="locked-slots-count">{data.items.length}</span>
+        <ChevronDown size={18} className={`ms-auto text-slate-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && <div className="px-5 pb-5 -mt-2" data-testid="locked-slots-panel">
+      <p className="text-xs text-slate-400 mb-3">{t("ls_sub", lang)}</p>
       {!data.can_unlock && (
         <div className="flex flex-wrap items-center gap-2 text-xs rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 mb-3 text-amber-100" data-testid="locked-slots-upsell">
           <Crown size={13} className="text-amber-300" />{t("ls_premium_only", lang)}
@@ -49,6 +57,7 @@ export default function LockedSlots() {
           );
         })}
       </div>
+      </div>}
     </div>
   );
 }
