@@ -2722,8 +2722,11 @@ def _block(day, start_min, reason, end_min=None):
 async def _taken_blocks(u):
     """Every locked block per local day for a user: other dates (booked) and cancelled dates/slots (cancelled)."""
     uid, out = u["id"], {}
+    unlocked = set(u.get("unlocked_slots") or [])
     def add(day, start, reason, end=None):
-        d, b = _block(day, start, reason, end); out.setdefault(d, []).append(b)
+        d, b = _block(day, start, reason, end)
+        if reason == "cancelled" and f"{d}|{b['from']}" in unlocked: return
+        out.setdefault(d, []).append(b)
     async for b in db.date_bookings.find({"status": {"$in": ["escrow", "accepted", "confirmed", "cancelled"]}, "$or": [{"to_id": uid}, {"from_id": uid}]},
                                          {"_id": 0, "status": 1, "scheduled_at": 1, "slot_from": 1, "slot_to": 1, "local_time": 1, "local_day": 1}):
         add((b.get("local_day") or b["scheduled_at"])[:10], _booking_start_min(b), "cancelled" if b["status"] == "cancelled" else "booked", _booking_end_min(b))
@@ -2750,9 +2753,31 @@ async def _assert_slot_free(u, day, start_min, start_dt):
         if start_min < lt and lf < end_min:
             raise HTTPException(400, f"{'SLOT_LOCKED' if b['reason'] == 'cancelled' else 'SLOT_BUSY'}:{b['from']}-{b['to']}")
 
+class UnlockSlotReq(BaseModel):
+    day: str
+    time: str
+
+@api.get("/me/locked-slots")
+async def my_locked_slots(user=Depends(get_current_user)):
+    """Upcoming times locked by a cancelled or refused date, which subscribers can reopen."""
+    today = _now().strftime("%Y-%m-%d")
+    blocks = await _taken_blocks(user)
+    items = sorted(({"day": d, "from": b["from"], "to": b["to"]} for d, v in blocks.items() if d >= today for b in v if b["reason"] == "cancelled"),
+                   key=lambda x: (x["day"], x["from"]))
+    return {"items": items, "can_unlock": has_premium(user)}
+
+@api.post("/me/locked-slots/unlock")
+async def unlock_slot(req: UnlockSlotReq, user=Depends(get_current_user)):
+    if not has_premium(user): raise HTTPException(403, "PREMIUM_REQUIRED")
+    day, tm = req.day[:10], req.time[:5]
+    if not any(b["from"] == tm and b["reason"] == "cancelled" for b in (await _taken_blocks(user)).get(day, [])):
+        raise HTTPException(404, "Locked slot not found")
+    await db.users.update_one({"id": user["id"]}, {"$addToSet": {"unlocked_slots": f"{day}|{tm}"}})
+    return {"ok": True}
+
 @api.get("/profiles/{pid}/availability")
 async def profile_availability(pid: str, user=Depends(get_current_user)):
-    p = await db.users.find_one({"id": pid}, {"_id": 0, "locked_slots": 1, **AVAIL_FIELDS})
+    p = await db.users.find_one({"id": pid}, {"_id": 0, "locked_slots": 1, "unlocked_slots": 1, **AVAIL_FIELDS})
     if not p: raise HTTPException(404, "Not found")
     time_window = p.get("availability_time")
     day_slots = p.get("availability_slots") or {}
@@ -4388,6 +4413,7 @@ async def _recipient_slot_or_400(rec, start_dt, local_day=None, local_time=None)
     block_end = start_dt + timedelta(hours=DATE_WINDOW_HOURS)
     for ls in (rec.get("locked_slots") or []):
         ls_s, ls_e = _pdt(ls.get("start")), _pdt(ls.get("end"))
+        if ls_s and f"{ls.get('date') or ls_s.strftime('%Y-%m-%d')}|{ls_s.strftime('%H:%M')}" in set(rec.get("unlocked_slots") or []): continue
         if ls_s and ls_e and start_dt < ls_e and ls_s < block_end:
             raise HTTPException(400, "SLOT_LOCKED")
     if await _conflict(rec["id"], start_dt, block_end, "___new___"):
@@ -4398,7 +4424,7 @@ async def _recipient_slot_or_400(rec, start_dt, local_day=None, local_time=None)
 async def create_invite(req: InviteCreateReq, user=Depends(get_current_user)):
     if req.recipient_id == user["id"]: raise HTTPException(400, "Cannot invite yourself")
     if not req.safety_ack: raise HTTPException(400, "SAFETY_ACK_REQUIRED")
-    rec = await db.users.find_one({"id": req.recipient_id}, {"_id": 0, "id": 1, "name": 1, "date_price": 1, "locked_slots": 1, **AVAIL_FIELDS})
+    rec = await db.users.find_one({"id": req.recipient_id}, {"_id": 0, "id": 1, "name": 1, "date_price": 1, "locked_slots": 1, "unlocked_slots": 1, **AVAIL_FIELDS})
     if not rec: raise HTTPException(404, "Recipient not found")
     # 3 mandatory custom date-idea options typed by the inviter (no predefined catalog)
     opts_text = [(req.activity_option_1 or "").strip(), (req.activity_option_2 or "").strip(), (req.activity_option_3 or "").strip()]
